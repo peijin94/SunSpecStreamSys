@@ -7,7 +7,46 @@ import time
 import threading
 import logging
 import gc
+import os
 from collections import deque
+from datetime import datetime, timezone, timedelta
+from astropy.time import Time
+
+# Configure matplotlib for headless server (no display required)
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for headless servers
+
+# Set environment variables for headless operation
+os.environ['MPLBACKEND'] = 'Agg'
+os.environ['DISPLAY'] = ''
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+def lwa_time_tag_to_datetime(time_tag: int, rate: float = 196_000_000) -> datetime:
+    """
+    Convert an LWA timetag to a UTC datetime.
+    
+    Parameters
+    ----------
+    time_tag : int
+        The raw timetag value from LWA data.
+    rate : float, optional
+        Tick rate in Hz (default = 196,000,000). 
+        For exact hardware clock, use 196_608_000.
+    
+    Returns
+    -------
+    datetime.datetime (UTC)
+    """
+    # Separate integer seconds and fractional ticks
+    secs, rem = divmod(time_tag, rate)
+    
+    # Compute fractional seconds from remaining ticks
+    frac = rem / rate
+    
+    # Convert to datetime (epoch = 1970-01-01 UTC)
+    return datetime(1970, 1, 1) + timedelta(seconds=secs + frac)
 
 class StreamReceiver:
     """
@@ -15,11 +54,18 @@ class StreamReceiver:
     Connects to ZMQ stream, processes data, and maintains a ring buffer.
     """
     
-    def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=1200, gc_interval=100):
+    def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=1200, gc_interval=100, 
+                 plot_interval=10, plot_dir='/fast/peijinz/streaming/figs/'):
         self.stream_addr = stream_addr
         self.stream_port = stream_port
         self.buffer_length = buffer_length
         self.gc_interval = gc_interval  # Garbage collection interval
+        self.plot_interval = plot_interval  # Plotting interval in seconds (0 = skip plotting)
+        self.plot_dir = plot_dir  # Directory to save plots
+        
+        # Create plot directory if it doesn't exist and plotting is enabled
+        if self.plot_interval > 0:
+            os.makedirs(self.plot_dir, exist_ok=True)
         
         # ZMQ setup
         self.context = zmq.Context()
@@ -40,10 +86,23 @@ class StreamReceiver:
         self.running = False
         self.shutdown_event = threading.Event()
         
+        # Plotting control
+        self.plot_running = False
+        self.plot_shutdown_event = threading.Event()
+        self.last_plot_time = 0
+        
+        # Delay tracking
+        self.delay = 0.0  # Current delay in seconds
+        self.delay_method = 'auto' # Default to 'auto'
+        
         # Setup logging
         self.setup_logging()
         
         self.log.info(f"StreamReceiver initialized: {stream_addr}:{stream_port}, buffer: {buffer_length}x1536")
+        if self.plot_interval > 0:
+            self.log.info(f"Plotting enabled: every {plot_interval}s to {plot_dir}")
+        else:
+            self.log.info("Plotting disabled (plot_interval=0)")
     
     def setup_logging(self):
         """Setup logging configuration"""
@@ -55,6 +114,118 @@ class StreamReceiver:
             handler.setFormatter(formatter)
             self.log.addHandler(handler)
             self.log.setLevel(logging.INFO)
+    
+    def create_plot(self):
+        """Create and save a plot of the buffer data"""
+        # Skip plotting if disabled
+        if self.plot_interval <= 0:
+            return
+            
+        try:
+            current_time = time.time()
+            
+            # Check if enough time has passed since last plot
+            if current_time - self.last_plot_time < self.plot_interval:
+                return
+            
+            self.last_plot_time = current_time
+            
+            # Create figure with subplots
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+            
+            # Get current buffer data
+            if self.buffer_index > 0:
+                # Get the most recent data (up to buffer_length frames)
+                n_frames = min(self.buffer_index, self.buffer_length)
+                recent_data = self.get_latest_data(n_frames=n_frames)
+                
+                if recent_data.size > 0:
+                    # Plot 1: Latest spectrum (log scale)
+                    latest_spectrum = recent_data[-1, :]  # Most recent frame
+                    freq_channels = np.arange(1536)
+                    
+                    # Use log scale for power spectrum
+                    ax1.semilogy(freq_channels, latest_spectrum, 'b-', linewidth=0.8)
+                    ax1.set_title(f'Latest Spectrum - {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")} UTC [lag: {self.delay:.1f}s]')
+                    ax1.set_xlabel('Frequency Channel')
+                    ax1.set_ylabel('Power (log scale)')
+                    ax1.grid(True, alpha=0.3)
+                    
+                    # Set reasonable y-axis limits for log scale
+                    valid_data = latest_spectrum[latest_spectrum > 0]
+                    if len(valid_data) > 0:
+                        y_min = np.percentile(valid_data, 1)  # 1st percentile
+                        y_max = np.percentile(valid_data, 99)  # 99th percentile
+                        ax1.set_ylim(y_min, y_max)
+                    
+                    # Plot 2: Waterfall plot (time vs frequency, log color scale)
+                    if recent_data.shape[0] > 1:
+                        # Create time axis (time in seconds relative to now)
+                        time_axis = np.linspace(-n_frames * 0.5, 0, n_frames)
+                        
+                        # Create frequency axis
+                        freq_axis = np.arange(1536)
+                        
+                        # Create waterfall plot with time as x-axis and frequency as y-axis
+                        im = ax2.pcolormesh(time_axis, freq_axis, recent_data.T, 
+                                           shading='auto', cmap='viridis', norm=matplotlib.colors.LogNorm())
+                        
+                        ax2.set_title(f'Waterfall Plot - Last {n_frames} frames ({n_frames * 0.5:.1f}s) [lag: {self.delay:.1f}s]')
+                        ax2.set_xlabel('Time (seconds ago)')
+                        ax2.set_ylabel('Frequency Channel')
+                        
+                        # Add colorbar with log scale
+                        cbar = plt.colorbar(im, ax=ax2, aspect=30)
+                        cbar.set_label('Power (log scale)')
+                        
+                        # Invert x-axis so most recent is at right
+                        ax2.invert_xaxis()
+                    else:
+                        ax2.text(0.5, 0.5, 'Insufficient data for waterfall plot', 
+                                ha='center', va='center', transform=ax2.transAxes)
+                        ax2.set_title('Waterfall Plot')
+            else:
+                # No data yet
+                ax1.text(0.5, 0.5, 'No data received yet', 
+                        ha='center', va='center', transform=ax1.transAxes)
+                ax1.set_title('Latest Spectrum')
+                ax2.text(0.5, 0.5, 'No data received yet', 
+                        ha='center', va='center', transform=ax2.transAxes)
+                ax2.set_title('Waterfall Plot')
+            
+            # Adjust layout and save
+            plt.tight_layout()
+            
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = os.path.join(self.plot_dir, f"spectrum_{timestamp}.png")
+            
+            # Save plot
+            plt.savefig(filename, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            
+            self.log.info(f"Plot saved: {filename}")
+            
+        except Exception as e:
+            self.log.error(f"Error creating plot: {str(e)}")
+    
+    def plot_loop(self):
+        """Main plotting loop that runs in a separate thread"""
+        self.log.info("Starting plotting loop...")
+        
+        while not self.plot_shutdown_event.is_set():
+            try:
+                # Create plot if enough time has passed
+                self.create_plot()
+                
+                # Sleep for a short interval
+                time.sleep(1)
+                
+            except Exception as e:
+                self.log.error(f"Error in plotting loop: {str(e)}")
+                time.sleep(1)
+        
+        self.log.info("Plotting loop stopped")
     
     def process_frame(self, data, header):
         """
@@ -68,6 +239,10 @@ class StreamReceiver:
             Header information including time_tag
         """
         try:
+            # Debug header information (only for first few frames to avoid spam)
+            if self.buffer_index < 1:  # Only debug first 1 frames
+                self.debug_header_info(header)
+            print(header)
             # Convert bytes back to numpy array
             # Expected shape: (1, N_freq, N_pol) = (1, 3072, 4)
             frame_data = np.frombuffer(data, dtype=np.float32)
@@ -94,8 +269,49 @@ class StreamReceiver:
             # Update buffer index (circular)
             self.buffer_index = (self.buffer_index + 1) % self.buffer_length
             
+            # Calculate delay between data timestamp and current time
+            if self.delay_method == 'manual':
+                # Use manually set delay, don't recalculate
+                pass
+            elif self.delay_method == 'buffer':
+                # Always use buffer-based calculation
+                streaming_interval = 0.5  # seconds per frame
+                self.delay = (self.buffer_length - self.buffer_index) * streaming_interval
+                self.log.debug(f"Buffer-based delay: {self.delay:.3f}s")
+            elif self.delay_method == 'auto':
+                current_time_utc = Time.now().unix
+                
+                # Use header["timestamp"] for delay calculation
+                if "timestamp" in header:
+                    timestamp_str = header["timestamp"]
+                    self.log.debug(f"Using header timestamp: {timestamp_str}")
+                    
+                    try:
+                        # Parse timestamp string (format: "1755552894.787341")
+                        header_time = float(timestamp_str)
+                        self.delay = current_time_utc - header_time
+                        self.log.debug(f"Calculated delay: {self.delay:.6f}s")
+                        
+                        # Sanity check for unreasonable delays
+                        if abs(self.delay) > 3600 or self.delay < 0:
+                            self.log.warning(f"Unreasonable delay calculated: {self.delay:.3f}s, timestamp: {timestamp_str}, header_time: {header_time}, current_utc: {current_time_utc:.6f}")
+                            self.delay = 0.0
+                    except (ValueError, TypeError) as e:
+                        self.log.warning(f"Could not parse timestamp: {timestamp_str}, error: {e}")
+                        self.delay = 0.0
+                else:
+                    self.log.warning("No 'timestamp' found in header, using fallback delay calculation")
+                    self.delay = 0.0
+                
+                # Fallback to buffer-based calculation if delay is unreasonable
+                if abs(self.delay) > 3600 or self.delay < 0:
+                    streaming_interval = 0.5
+                    relative_delay = (self.buffer_length - self.buffer_index) * streaming_interval
+                    self.log.info(f"Using fallback delay calculation: {relative_delay:.3f}s (buffer-based)")
+                    self.delay = relative_delay
+            
             self.log.debug(f"Processed frame: time_tag={header.get('time_tag', 'N/A')}, "
-                          f"buffer_index={self.buffer_index}, data_shape={averaged_data.shape}")
+                          f"buffer_index={self.buffer_index}, data_shape={averaged_data.shape}, delay={self.delay:.3f}s")
             
             # Clean up temporary objects to reduce memory overhead
             del frame_data, pol_data, pol_data_reshaped, averaged_data
@@ -162,7 +378,15 @@ class StreamReceiver:
         self.receive_thread = threading.Thread(target=self.receive_loop, daemon=True)
         self.receive_thread.start()
         
-        self.log.info("StreamReceiver started")
+        # Start plotting thread only if plotting is enabled
+        if self.plot_interval > 0:
+            self.plot_running = True
+            self.plot_shutdown_event.clear()
+            self.plot_thread = threading.Thread(target=self.plot_loop, daemon=True)
+            self.plot_thread.start()
+            self.log.info("StreamReceiver started (including plotting)")
+        else:
+            self.log.info("StreamReceiver started (plotting disabled)")
     
     def stop(self):
         """Stop the receiver"""
@@ -174,7 +398,16 @@ class StreamReceiver:
         self.running = False
         self.shutdown_event.set()
         
-        # Wait for thread to finish
+        # Stop plotting only if it was started
+        if self.plot_running:
+            self.plot_running = False
+            self.plot_shutdown_event.set()
+            
+            # Wait for plotting thread to finish
+            if hasattr(self, 'plot_thread'):
+                self.plot_thread.join(timeout=5.0)
+        
+        # Wait for receive thread to finish
         if hasattr(self, 'receive_thread'):
             self.receive_thread.join(timeout=5.0)
         
@@ -189,12 +422,83 @@ class StreamReceiver:
         
         self.log.info("StreamReceiver stopped")
     
+    def get_current_delay(self):
+        """Get the current delay between data time and current time"""
+        return self.delay
+    
+    def set_delay(self, delay_seconds):
+        """Manually set the delay value (useful for debugging)"""
+        self.delay = delay_seconds
+        self.log.info(f"Delay manually set to: {self.delay:.3f}s")
+    
+    def set_delay_calculation_method(self, method='auto'):
+        """
+        Set the delay calculation method
+        
+        Parameters:
+        -----------
+        method : str
+            'auto' - Try to use time_tag, fallback to buffer-based
+            'buffer' - Always use buffer-based calculation
+            'manual' - Use manually set delay value
+        """
+        self.delay_method = method
+        self.log.info(f"Delay calculation method set to: {method}")
+    
+    def debug_header_info(self, header):
+        """Debug method to inspect header information"""
+        self.log.info("=== Header Debug Information ===")
+        for key, value in header.items():
+            self.log.info(f"  {key}: {value} (type: {type(value)})")
+        
+        current_time = time.time()
+        
+        # Check for timestamp field
+        if "timestamp" in header:
+            timestamp_str = header["timestamp"]
+            self.log.info(f"  Header timestamp: {timestamp_str} (type: {type(timestamp_str)})")
+            
+            try:
+                # Parse timestamp string (format: "1755552894.787341")
+                header_time = float(timestamp_str)
+                self.log.info(f"  Parsed timestamp: {header_time:.6f}s")
+                
+                # Calculate delay
+                delay = current_time - header_time
+                self.log.info(f"  Calculated delay: {delay:.6f}s")
+                
+                # Check if delay is reasonable
+                if abs(delay) < 86400:  # Less than 24 hours
+                    self.log.info("  ✓ Delay is reasonable")
+                else:
+                    self.log.info("  ⚠️  Delay is large (this may be normal for your system)")
+                    
+            except (ValueError, TypeError) as e:
+                self.log.info(f"  ✗ Could not parse timestamp: {e}")
+        else:
+            self.log.info("  No 'timestamp' field found in header")
+            
+        # Also check for time_tag field for backward compatibility
+        if "time_tag" in header:
+            time_tag = header["time_tag"]
+            self.log.info(f"  Header time_tag (legacy): {time_tag} (type: {type(time_tag)})")
+        else:
+            self.log.info("  No 'time_tag' field found in header")
+        
+        self.log.info("=== End Header Debug ===")
+    
     def get_buffer_status(self):
         """Get current buffer status"""
         return {
             'buffer_index': self.buffer_index,
             'buffer_shape': self.ring_buffer.shape,
-            'is_running': self.running
+            'is_running': self.running,
+            'plot_running': self.plot_running,
+            'last_plot_time': self.last_plot_time,
+            'current_delay': self.delay,
+            'clock_offset': None, # Removed clock_offset
+            'last_sync_time': None, # Removed last_sync_time
+            'synchronized_time': Time.now().unix # Use UTC time
         }
     
     def force_garbage_collection(self):
@@ -283,6 +587,10 @@ def main():
                        help='Ring buffer length (default: 1200)')
     parser.add_argument('--gc-interval', type=int, default=100,
                        help='Garbage collection interval in frames (default: 100)')
+    parser.add_argument('--plot-interval', type=int, default=10,
+                       help='Plotting interval in seconds (0 = disable plotting, default: 10)')
+    parser.add_argument('--plot-dir', type=str, default='/fast/peijinz/streaming/figs/',
+                       help='Directory to save plots (default: /fast/peijinz/streaming/figs/)')
     parser.add_argument('--log-level', type=str, default='INFO',
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                        help='Log level (default: INFO)')
@@ -301,7 +609,9 @@ def main():
         stream_addr=args.addr,
         stream_port=args.port,
         buffer_length=args.buffer_length,
-        gc_interval=args.gc_interval
+        gc_interval=args.gc_interval,
+        plot_interval=args.plot_interval,
+        plot_dir=args.plot_dir
     )
     
     try:

@@ -35,6 +35,7 @@ This receiver class:
 - Processes incoming data frames
 - Maintains a ring buffer of 1200 × 1536 data points
 - Can be started/stopped at any time
+- **NEW**: Automatically generates and saves plots every 10 seconds
 
 **Key Features:**
 - Automatic connection to streaming source
@@ -43,6 +44,9 @@ This receiver class:
 - Thread-safe operation with proper shutdown handling
 - Automatic garbage collection to reduce memory overhead
 - Memory usage monitoring and optimization
+- **NEW**: Automatic plotting with configurable interval
+- **NEW**: Two-panel plots: latest spectrum + waterfall visualization
+- **NEW**: Plots saved to configurable directory with timestamps
 
 ## Data Flow
 
@@ -60,6 +64,95 @@ OVRO Data Recorder → AvgStreamingOp → ZMQ Stream → StreamReceiver → Ring
 6. **Frequency Averaging**: Average down by factor of 2 → (1536,)
 7. **Ring Buffer**: Store in 1200 × 1536 circular buffer
 
+## Plotting System
+
+The StreamReceiver now includes an automatic plotting system that generates visualizations every 10 seconds (configurable):
+
+### Plot Types
+
+1. **Latest Spectrum Plot** (top panel):
+   - Shows the most recent power spectrum
+   - **Log scale** for better dynamic range visualization
+   - X-axis: Frequency channels (0-1535)
+   - Y-axis: Power values (logarithmic scale)
+   - Includes timestamp and lag information
+   - Grid overlay for easy reading
+
+2. **Waterfall Plot** (bottom panel):
+   - **Time vs Frequency visualization** of recent data
+   - **X-axis: Time** (most recent at right)
+   - **Y-axis: Frequency channels**
+   - **Log-scale color mapping** for better dynamic range
+   - Color-coded power values using viridis colormap
+   - Includes colorbar and time/lag information
+
+### Plot Features
+
+- **Log Scales**: Both power spectrum and waterfall use logarithmic scaling for better dynamic range
+- **Real-time Delay Tracking**: Automatically tracks delay between data timestamp and current time using header time_tag
+- **Multiple Delay Methods**: Configurable delay calculation (auto, buffer-based, or manual)
+- **Lag Information**: Titles show actual data lag in real-time (not estimated)
+- **Orientation**: Waterfall plot shows time progression horizontally (left to right)
+- **Dynamic Range**: Automatic y-axis limits based on data percentiles for optimal viewing
+- **Real-time Updates**: Delay information updates with each new data frame
+- **Robust Error Handling**: Automatic fallback to buffer-based calculation if timestamp parsing fails
+- **LWA Timestamp Support**: Direct parsing of fixed-format timestamp strings (e.g., "1755552894.787341")
+- **UTC Time Consistency**: All timestamps and delay calculations use UTC time via AstroPy Time module for consistency across timezones
+
+### Delay Calculation Methods
+
+The system supports three methods for calculating the delay between data timestamp and current time:
+
+1. **`auto` (default)**: 
+   - Uses `header["timestamp"]` field for accurate delay calculation
+   - Automatically detects LWA time tag format and converts to UTC
+   - Falls back to buffer-based calculation if timestamp parsing fails
+   - Provides real-time delay updates with each data frame
+
+2. **`buffer`**: 
+   - Uses relative buffer position for delay estimation
+   - Calculates: `(buffer_length - buffer_index) * streaming_interval`
+   - Useful when timestamp information is unavailable or unreliable
+
+3. **`manual`**: 
+   - Uses manually set delay value via `receiver.set_delay(seconds)`
+   - Useful for testing or when you want to override automatic calculation
+
+#### LWA System Support
+
+The system now properly handles **LWA timestamps**:
+- **Fixed format**: `header["timestamp"]` is always a string like `"1755552894.787341"`
+- **Direct parsing**: Converts timestamp string directly to float using `float(timestamp_str)`
+- **UTC timing**: All delay calculations use UTC time via AstroPy Time module
+- **Example timestamp**: `"1755552894.787341"` represents seconds since 1970-01-01 UTC
+- **Simple conversion**: No complex tick calculations needed - direct epoch time comparison
+
+**Usage:**
+```python
+# Set delay calculation method
+receiver.set_delay_calculation_method('buffer')  # Always use buffer-based
+receiver.set_delay_calculation_method('manual')  # Use manual setting
+receiver.set_delay_calculation_method('auto')    # Default: try time_tag, fallback to buffer
+
+# Manually set delay
+receiver.set_delay(2.5)  # Set delay to 2.5 seconds
+```
+
+### Plot Configuration
+
+- **Interval**: Configurable plotting frequency (default: 10 seconds, 0 = disable plotting)
+- **Directory**: Plots saved to `/fast/peijinz/streaming/figs/` by default
+- **Format**: High-resolution PNG files (150 DPI)
+- **Naming**: `spectrum_YYYYMMDD_HHMMSS.png` format
+- **Size**: 12×10 inch figures with tight layout
+
+### Plotting Thread
+
+- Runs in a separate daemon thread to avoid blocking data reception
+- Automatically creates plot directory if it doesn't exist
+- Handles errors gracefully and continues operation
+- Integrates with the main shutdown process
+
 ## Installation and Setup
 
 ### Prerequisites
@@ -73,6 +166,20 @@ pip install -r requirements.txt
 
 - `numpy` >= 1.19.0
 - `pyzmq` >= 22.0.0
+- `matplotlib` >= 3.3.0
+- `psutil` >= 5.8.0
+- `astropy` >= 4.0.0
+
+### Headless Server Configuration
+
+The plotting system is automatically configured for headless servers (SSH sessions without display):
+
+- **Matplotlib Backend**: Uses 'Agg' backend (non-interactive)
+- **Environment Variables**: Automatically set `MPLBACKEND=Agg` and `DISPLAY=""`
+- **No Display Required**: Plots are saved directly to files without GUI
+- **SSH Compatible**: Works perfectly in remote server environments
+
+This configuration ensures that plotting works seamlessly on headless servers where no X11 display is available.
 
 ## Usage
 
@@ -96,6 +203,8 @@ pip install -r requirements.txt
 - `--port`: Stream port (default: 9798)
 - `--buffer-length`: Ring buffer length (default: 1200)
 - `--gc-interval`: Garbage collection interval in frames (default: 100)
+- `--plot-interval`: Plotting interval in seconds (0 = disable plotting, default: 10)
+- `--plot-dir`: Directory to save plots (default: /fast/peijinz/streaming/figs/)
 - `--log-level`: Logging level (DEBUG, INFO, WARNING, ERROR)
 
 ### Programmatic Usage
@@ -103,11 +212,22 @@ pip install -r requirements.txt
 ```python
 from stream_receiver import StreamReceiver
 
-# Create receiver
+# Create receiver with plotting enabled
 receiver = StreamReceiver(
     stream_addr='127.0.0.1',
     stream_port=9798,
-    buffer_length=1200
+    buffer_length=1200,
+    plot_interval=10,  # Plot every 10 seconds
+    plot_dir='/fast/peijinz/streaming/figs/'  # Save plots here
+)
+
+# Create receiver with plotting disabled
+receiver_no_plots = StreamReceiver(
+    stream_addr='127.0.0.1',
+    stream_port=9798,
+    buffer_length=1200,
+    plot_interval=0,  # Disable plotting
+    plot_dir='/fast/peijinz/streaming/figs/'  # This will be ignored when plotting is disabled
 )
 
 # Start receiving
@@ -116,8 +236,14 @@ receiver.start()
 # Get latest data
 latest_data = receiver.get_latest_data(n_frames=10)  # Get last 10 frames
 
-# Get status
+# Get status (now includes plotting information)
 status = receiver.get_buffer_status()
+print(f"Plotting: {status['plot_running']}, Last plot: {status['last_plot_time']}")
+print(f"Current delay: {status['current_delay']:.3f}s")
+
+# Get delay information directly
+current_delay = receiver.get_current_delay()
+print(f"Data lag: {current_delay:.3f} seconds")
 
 # Stop when done
 receiver.stop()
@@ -129,10 +255,28 @@ receiver.stop()
 
 ```bash
 cd SunSpecStreamSys
-python test_receiver.py
+python tests/test_receiver.py
 ```
 
 This will test the ring buffer functionality without requiring an active stream.
+
+### Test Plotting Functionality
+
+```bash
+cd SunSpecStreamSys
+python tests/test_plotting.py
+```
+
+This will test the plotting system without requiring an active stream.
+
+### Test Headless Plotting
+
+```bash
+cd SunSpecStreamSys
+python tests/test_headless_plotting.py
+```
+
+This will verify that plotting works correctly on headless servers without display issues.
 
 ### Test with Active Stream
 
@@ -172,6 +316,7 @@ The `StreamReceiver` provides status information:
 - Buffer index and shape
 - Running state
 - Latest data statistics
+- **Current delay between data timestamp and real-time**
 
 ### Performance Metrics
 
@@ -189,6 +334,39 @@ The `StreamReceiver` provides status information:
 2. **No data received**: Check ZMQ socket configuration and firewall settings
 3. **Buffer overflow**: Adjust buffer length or processing frequency
 4. **High CPU usage**: Check streaming interval and data processing efficiency
+
+### Display and Matplotlib Issues
+
+5. **"Could not connect to display" error**: 
+   - This is normal on headless servers
+   - The system automatically uses the 'Agg' backend
+   - Plots are saved to files without displaying
+   - No action needed
+
+6. **"QApplication was not created in the main() thread" warning**:
+   - This warning is harmless on headless servers
+   - Matplotlib automatically handles threading issues
+   - Plots will still be generated and saved correctly
+
+7. **"UserWarning: Starting a Matplotlib GUI outside of the main thread"**:
+   - This warning is expected and can be ignored
+   - The plotting system is designed to work in background threads
+   - No impact on functionality
+
+### Delay Calculation Issues
+
+8. **Large negative delays (e.g., -342329810474.9s)**:
+   - This indicates invalid `time_tag` values in the header data
+   - The system automatically falls back to buffer-based calculation
+   - Check header data format and `time_tag` values
+   - Use `receiver.set_delay_calculation_method('buffer')` for reliable timing
+   - Run `python tests/debug_time_tag.py` to diagnose time format issues
+
+9. **Large positive delays (>1 hour)**:
+   - This is normal for LWA systems using timestamps from earlier observations
+   - The delay represents the time difference between data timestamp and current time
+   - System automatically handles LWA timestamp conversion using `lwa_time_tag_to_datetime()`
+   - Use `receiver.set_delay_calculation_method('buffer')` if you prefer relative timing
 
 ### Debug Mode
 
