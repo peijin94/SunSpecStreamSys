@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live Spectrum Display - StreamReceiver</title>
+    <style>
+        html, body { 
+            height:100%; 
+            margin:0; 
+            background:#0b0f14; 
+            color:#e6edf3; 
+            font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; 
+        }
+        
+        .main-container {
+            display: flex;
+            height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background: #1a1a1a;
+            border: 2px solid #333;
+            border-radius: 8px;
+            margin-right: 20px;
+            padding: 40px;  /* All sides 40px padding */
+        }
+        
+        .canvas-label {
+            position: absolute;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .canvas-label.canvas {
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+            background: rgba(0,100,100,0.9);
+            padding: 20px 40px;
+        }
+        
+        .frequency-range {
+            position: absolute;
+            font-size: 12px;
+            color: #9fb0c2;
+        }
+        
+        .frequency-range.left {
+            left: 20px;
+            bottom: 20px;
+        }
+        
+        .frequency-range.right {
+            right: 20px;
+            bottom: 20px;
+        }
+        
+        .time-direction {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 12px;
+            color: #9fb0c2;
+        }
+        
+        .time-arrow {
+            color: #1f6feb;
+            font-weight: bold;
+        }
+        
+        canvas { 
+            display: block; 
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated; 
+        }
+        
+        .status {
+            position: relative;
+            background: rgba(20,26,33,.9);
+            border: 1px solid #1e2732;
+            border-radius: 12px;
+            padding: 12px;
+            font-size: 12px;
+            color: #9fb0c2;
+            min-width: 200px;
+        }
+        
+        .error {
+            color: #f85149;
+        }
+        
+        .success {
+            color: #7ee787;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="canvas-container">
+            <canvas id="view"></canvas>
+            <div class="time-direction">
+                <span class="time-arrow">↓</span> Now
+            </div>
+        </div>
+        
+        <div class="status">
+            <div>Status: <span id="status">Connecting...</span></div>
+            <div>Frames: <span id="frameCount">0</span></div>
+            <div>Update Rate: <span id="updateRateDisplay">2.0 Hz</span></div>
+            <div>Data Range: 10^4 to 10^9</div>
+            <div>Last Update: <span id="lastUpdate">Never</span></div>
+        </div>
+    </div>
+
+    <script>
+        (function(){
+            const view = document.getElementById('view');
+            const ctx = view.getContext('2d', { alpha:false, desynchronized:true });
+
+            // Offscreen texture canvas for ring buffer
+            let tex = document.createElement('canvas');
+            let tctx = tex.getContext('2d', { alpha:false, desynchronized:true });
+
+            // State
+            let bins = 1536;           // frequency bins (fixed for LWA data)
+            let heightLines = 640;     // waterfall height (now represents time lines)
+            let writeX = heightLines - 1;  // ring buffer write position (right to left)
+            let running = true;
+            let updateRate = 2.0;      // updates per second (every 0.5s)
+            let dataMin = 1e4;         // minimum data value (10^4)
+            let dataMax = 1e9;         // maximum data value (10^9)
+            let freqMin = 15;          // minimum frequency in MHz
+            let freqMax = 85;          // maximum frequency in MHz
+            let lastData = null;
+            let frameCount = 0;
+            let lastDelay = 0;
+
+            // UI elements
+            const $ = id => document.getElementById(id);
+            const statusEl = $('status'), frameCountEl = $('frameCount');
+            const updateRateDisplayEl = $('updateRateDisplay'), lastUpdateEl = $('lastUpdate');
+
+            // Fixed update rate - no UI controls needed
+            function syncLabels(){
+                updateRateDisplayEl.textContent = updateRate + ' Hz';
+            }
+
+            // Resize handling
+            function resize(){
+                const dpr = Math.min(2, window.devicePixelRatio || 1);
+                const w = Math.floor(innerWidth * dpr);
+                const h = Math.floor(innerHeight * dpr);
+                if (view.width !== w || view.height !== h){
+                    view.width = w; view.height = h;
+                }
+            }
+            window.addEventListener('resize', resize);
+            resize();
+
+            // Texture management
+            let columnImage = null;
+            function recreateTexture(){
+                tex.width = heightLines;  // Width = time lines (640)
+                tex.height = bins;        // Height = frequency bins (1536)
+                tctx.fillStyle = '#000';
+                tctx.fillRect(0,0,tex.width, tex.height);
+                columnImage = tctx.createImageData(1, bins);  // 1 pixel wide, bins tall
+                writeX = heightLines - 1;  // Start from rightmost column
+            }
+
+            // Data mapping functions
+            function toIdx(v){
+                if (v < dataMin) v = dataMin;
+                if (v > dataMax) v = dataMax;
+                const logV = Math.log(v) / Math.LN10;
+                const t = (logV - Math.log(dataMin) / Math.LN10) / ((Math.log(dataMax) / Math.LN10) - (Math.log(dataMin) / Math.LN10));
+                return Math.max(0, Math.min(255, Math.round(t * 255)));
+            }
+
+            // Write data column to texture (for rolling waterfall: left to right)
+            function writeRow(dataArray){
+                if (!dataArray || dataArray.length !== bins) return;
+                
+                // Create a column of data (frequency bins as height)
+                const columnData = columnImage.data;
+                
+                for (let y = 0; y < bins; y++){
+                    // Flip the y index to invert the frequency display
+                    const flippedY = bins - 1 - y;
+                    const intensity = toIdx(dataArray[y]);
+                    const q = flippedY * 4;
+                    columnData[q] = intensity;     // Red
+                    columnData[q+1] = intensity;   // Green  
+                    columnData[q+2] = intensity;   // Blue
+                    columnData[q+3] = 255;         // Alpha
+                }
+                
+                // Put the column at the current writeX position (left side)
+                tctx.putImageData(columnImage, writeX, 0);
+                
+                // Move write position right (increment) for next column
+                writeX = (writeX + 1) % heightLines;
+                
+                frameCount++;
+                frameCountEl.textContent = frameCount;
+            }
+
+            // Render texture to view with rolling waterfall effect
+            // Newest data on left, spectrum rolls right over time
+            function blitToView(){
+                const W = view.width, H = view.height;
+                
+                // Clear canvas first
+                ctx.clearRect(0, 0, W, H);
+                
+                // Calculate proper scaling to fit the smaller plot area
+                const plotWidth = W - 80;   // Account for left/right padding (40px each)
+                const plotHeight = H - 80;  // Account for top/bottom padding (40px each)
+                const scaleX = plotWidth / heightLines;  // Scale time (x-axis) to fit plot width
+                const scaleY = plotHeight / bins;        // Scale frequency (y-axis) to fit plot height
+                
+                // Draw the waterfall with rolling effect in the smaller plot area
+                // We need to draw the texture in two parts to create the rolling effect
+                
+                // Part 1: Draw the left portion (newest data)
+                // This should be from writeX to heightLines-1 (left side)
+                const leftPortion = heightLines - writeX;
+                if (leftPortion > 0) {
+                    const leftWidth = leftPortion * scaleX;
+                    ctx.drawImage(tex, writeX, 0, leftPortion, bins, 
+                                40, 40, leftWidth, plotHeight);  // Position with 40px padding
+                }
+                
+                // Part 2: Draw the right portion (older data)
+                // This should be from 0 to writeX-1 (right side)
+                if (writeX > 0) {
+                    const rightWidth = writeX * scaleX;
+                    const rightX = 40 + leftPortion * scaleX;  // Position with 40px padding
+                    ctx.drawImage(tex, 0, 0, writeX, bins, 
+                                rightX, 40, rightWidth, plotHeight);  // Position with 40px padding
+                }
+                
+                // Add frequency and time scale labels
+                drawFrequencyScale(W, H);
+                drawTimeScale(W, H);
+            }
+            
+            // Draw frequency scale on the left (vertical)
+            function drawFrequencyScale(canvasWidth, canvasHeight) {
+                ctx.save();
+                ctx.fillStyle = '#9fb0c2';
+                ctx.font = '45px monospace';  // Increased font size
+                ctx.textAlign = 'right';
+                
+                // Draw frequency markers vertically (15MHz at top, 85MHz at bottom)
+                const frequencies = [15, 25, 35, 45, 55, 65, 75, 85];
+                frequencies.forEach(freq => {
+                    // Map frequency to y position (15MHz at top, 85MHz at bottom)
+                    const freqRatio = (freqMax - freq) / (freqMax - freqMin);
+                    const y = 40 + freqRatio * (canvasHeight - 80);  // Account for 40px padding
+                    ctx.fillText(freq + 'MHz', 35, y + 4);  // Position text outside plot
+                    
+                    // Draw horizontal line extending across the plot
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(40, y);  // Start from plot edge (40px left padding)
+                    ctx.lineTo(canvasWidth - 40, y);  // End at plot edge (40px right padding)
+                    ctx.stroke();
+                });
+                
+                ctx.restore();
+            }
+            
+            // Draw time scale on the bottom (horizontal) - newest at left, oldest at right
+            function drawTimeScale(canvasWidth, canvasHeight) {
+                ctx.save();
+                ctx.fillStyle = '#9fb0c2';
+                ctx.font = '45px monospace';  // Increased font size
+                ctx.textAlign = 'center';
+                
+                // Draw time markers horizontally (newest at left, oldest at right)
+                const timeLabels = ['Now', '-150s', '-300s', '-450s', 'Oldest'];
+                timeLabels.forEach((label, index) => {
+                    // Map time to x position (newest = left, oldest = right)
+                    const timeRatio = (timeLabels.length - 1 - index) / (timeLabels.length - 1);
+                    const x = 40 + timeRatio * (canvasWidth - 80);  // Account for 40px padding
+                    ctx.fillText(label, x, canvasHeight - 25);  // Position text below plot
+                    
+                    // Draw vertical line extending up the plot
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x, 40);  // Start from plot edge (40px top padding)
+                    ctx.lineTo(x, canvasHeight - 40);  // End at plot edge (40px bottom padding)
+                    ctx.stroke();
+                });
+                
+                ctx.restore();
+            }
+
+            // Data fetching
+            async function fetchData(){
+                try {
+                    const response = await fetch('/data');
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.length > 0) {
+                            lastData = data; // Store the data
+                            writeRow(data);  // Write to waterfall
+                            lastUpdateEl.textContent = new Date().toLocaleTimeString();
+                            statusEl.textContent = 'Connected';
+                            statusEl.className = 'success';
+                        }
+                    } else {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    console.error('Error fetching data:', error);
+                    statusEl.textContent = 'Connection Error';
+                    statusEl.className = 'error';
+                }
+            }
+
+            // FPS counter
+            let lastT = performance.now(), acc=0, frames=0, lastFpsT=lastT;
+
+            function loop(now){
+                const dt = Math.min(0.1, (now - lastT)/1000);
+                lastT = now; 
+                acc += dt * updateRate;
+
+                if (running && acc >= 1){ 
+                    fetchData(); 
+                    acc -= 1; 
+                }
+
+                blitToView();
+
+                frames++;
+                if (now - lastFpsT > 500){
+                    const fps = Math.round(2000*frames/(now-lastFpsT))/2;
+                    // fpsEl.textContent = fps + ' fps'; // Removed as per edit hint
+                    lastFpsT = now; frames = 0;
+                }
+
+                requestAnimationFrame(loop);
+            }
+
+            // Initialize
+            recreateTexture();
+            syncLabels();
+            
+            // Start data fetching immediately
+            fetchData();
+            
+            // Start render loop
+            requestAnimationFrame(loop);
+        })();
+    </script>
+</body>
+</html>

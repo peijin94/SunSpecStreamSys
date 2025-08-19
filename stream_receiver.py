@@ -23,6 +23,15 @@ os.environ['DISPLAY'] = ''
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
+# Web server imports
+try:
+    from flask import Flask, render_template, jsonify, Response
+    from flask_cors import CORS
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
+    print("Warning: Flask not available. Web interface will be disabled.")
+
 def lwa_time_tag_to_datetime(time_tag: int, rate: float = 196_000_000) -> datetime:
     """
     Convert an LWA timetag to a UTC datetime.
@@ -55,13 +64,14 @@ class StreamReceiver:
     """
     
     def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=1200, gc_interval=100, 
-                 plot_interval=10, plot_dir='/fast/peijinz/streaming/figs/'):
+                 plot_interval=10, plot_dir='/fast/peijinz/streaming/figs/', start_webshow=False):
         self.stream_addr = stream_addr
         self.stream_port = stream_port
         self.buffer_length = buffer_length
         self.gc_interval = gc_interval  # Garbage collection interval
         self.plot_interval = plot_interval  # Plotting interval in seconds (0 = skip plotting)
         self.plot_dir = plot_dir  # Directory to save plots
+        self.start_webshow = start_webshow # Flag to start web server
         
         # Create plot directory if it doesn't exist and plotting is enabled
         if self.plot_interval > 0:
@@ -103,6 +113,10 @@ class StreamReceiver:
             self.log.info(f"Plotting enabled: every {plot_interval}s to {plot_dir}")
         else:
             self.log.info("Plotting disabled (plot_interval=0)")
+        if self.start_webshow:
+            self.log.info("Web server enabled (localhost:9898)")
+        else:
+            self.log.info("Web server disabled (start_webshow=False)")
     
     def setup_logging(self):
         """Setup logging configuration"""
@@ -242,7 +256,6 @@ class StreamReceiver:
             # Debug header information (only for first few frames to avoid spam)
             if self.buffer_index < 1:  # Only debug first 1 frames
                 self.debug_header_info(header)
-            print(header)
             # Convert bytes back to numpy array
             # Expected shape: (1, N_freq, N_pol) = (1, 3072, 4)
             frame_data = np.frombuffer(data, dtype=np.float32)
@@ -387,6 +400,13 @@ class StreamReceiver:
             self.log.info("StreamReceiver started (including plotting)")
         else:
             self.log.info("StreamReceiver started (plotting disabled)")
+        
+        # Start web server only if enabled
+        if self.start_webshow:
+            self.start_webserver()
+            self.log.info("Web server started")
+        else:
+            self.log.info("Web server disabled (start_webshow=False)")
     
     def stop(self):
         """Stop the receiver"""
@@ -406,6 +426,10 @@ class StreamReceiver:
             # Wait for plotting thread to finish
             if hasattr(self, 'plot_thread'):
                 self.plot_thread.join(timeout=5.0)
+        
+        # Stop web server
+        if self.start_webshow:
+            self.stop_webserver()
         
         # Wait for receive thread to finish
         if hasattr(self, 'receive_thread'):
@@ -498,7 +522,8 @@ class StreamReceiver:
             'current_delay': self.delay,
             'clock_offset': None, # Removed clock_offset
             'last_sync_time': None, # Removed last_sync_time
-            'synchronized_time': Time.now().unix # Use UTC time
+            'synchronized_time': Time.now().unix, # Use UTC time
+            'webserver': self.get_webserver_status()
         }
     
     def force_garbage_collection(self):
@@ -573,6 +598,99 @@ class StreamReceiver:
         # Return data in chronological order (oldest first)
         return self.ring_buffer[indices[::-1]]
 
+    def start_webserver(self):
+        """Start the Flask web server for live spectrum display"""
+        if not FLASK_AVAILABLE:
+            self.log.warning("Flask is not available, cannot start web server.")
+            return
+
+        try:
+            self.app = Flask(__name__)
+            CORS(self.app)
+
+            @self.app.route('/')
+            def index():
+                return render_template('index.html')
+
+            @self.app.route('/data')
+            def get_data():
+                # Get the latest data from the ring buffer
+                if self.buffer_index > 0:
+                    latest_data = self.get_latest_data(n_frames=1)
+                    if latest_data.size > 0:
+                        # Return the most recent frame as a list
+                        data_json = latest_data[0].tolist()
+                        return jsonify(data_json)
+                # Return empty list if no data
+                return jsonify([])
+
+            @self.app.route('/plot')
+            def get_plot():
+                # Create a temporary plot file
+                try:
+                    self.create_plot()
+                    with open(os.path.join(self.plot_dir, f"spectrum_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"), 'rb') as f:
+                        return Response(f.read(), mimetype='image/png')
+                except Exception as e:
+                    self.log.error(f"Error serving plot: {e}")
+                    return "Error serving plot", 500
+
+            # Use fixed port 9527 for web server
+            web_port = 9527
+            self.log.info(f"Web server starting on http://localhost:{web_port}")
+            
+            # Start web server in a separate thread
+            self.webserver_thread = threading.Thread(
+                target=lambda: self.app.run(host='localhost', port=web_port, debug=False, use_reloader=False),
+                daemon=True
+            )
+            self.webserver_thread.start()
+            
+            # Wait a moment for server to start
+            time.sleep(2)
+            self.log.info(f"Web server started successfully on port {web_port}")
+            
+        except Exception as e:
+            self.log.error(f"Failed to start web server: {e}")
+            self.log.error("Web interface will not be available")
+
+    def stop_webserver(self):
+        """Stop the Flask web server"""
+        if hasattr(self, 'webserver_thread') and self.webserver_thread.is_alive():
+            self.log.info("Stopping web server...")
+            self.webserver_thread.join(timeout=5.0)
+            self.log.info("Web server stopped")
+
+    def is_webserver_running(self):
+        """Check if the web server is running and accessible"""
+        if not self.start_webshow or not hasattr(self, 'webserver_thread'):
+            return False
+        
+        try:
+            import requests
+            response = requests.get("http://localhost:9527/", timeout=2)
+            return response.status_code == 200
+        except:
+            return False
+    
+    def get_webserver_status(self):
+        """Get web server status information"""
+        if not self.start_webshow:
+            return {
+                'enabled': False,
+                'running': False,
+                'url': None,
+                'status': 'disabled'
+            }
+        
+        running = self.is_webserver_running()
+        return {
+            'enabled': True,
+            'running': running,
+            'url': 'http://localhost:9527' if running else None,
+            'status': 'running' if running else 'failed'
+        }
+
 
 def main():
     """Main function for standalone testing"""
@@ -594,6 +712,8 @@ def main():
     parser.add_argument('--log-level', type=str, default='INFO',
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                        help='Log level (default: INFO)')
+    parser.add_argument('--start-webshow', action='store_true',
+                       help='Start a web server on localhost:9898 to display live spectrum data')
     
     args = parser.parse_args()
     
@@ -611,7 +731,8 @@ def main():
         buffer_length=args.buffer_length,
         gc_interval=args.gc_interval,
         plot_interval=args.plot_interval,
-        plot_dir=args.plot_dir
+        plot_dir=args.plot_dir,
+        start_webshow=args.start_webshow
     )
     
     try:
@@ -628,6 +749,11 @@ def main():
                 print(f"Memory: RSS={memory_info['rss_mb']:.1f}MB, "
                       f"Objects={memory_info['gc_objects']}, "
                       f"Garbage={memory_info['gc_garbage']}")
+                
+                # Show web server status if enabled
+                if receiver.start_webshow:
+                    web_status = receiver.get_webserver_status()
+                    print(f"Web Server: {web_status['status']} - {web_status['url']}")
                 
     except KeyboardInterrupt:
         print("\nShutting down...")

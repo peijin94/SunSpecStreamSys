@@ -25,7 +25,7 @@ fi
 
 # Check if required packages are installed
 echo "Checking dependencies..."
-python3 -c "import zmq, numpy, matplotlib" 2>/dev/null
+python3 -c "import zmq, numpy, matplotlib, flask" 2>/dev/null
 if [ $? -ne 0 ]; then
     echo "Installing required packages..."
     pip3 install -r requirements.txt
@@ -37,11 +37,20 @@ mkdir -p /fast/peijinz/streaming/figs/
 
 # Start the receiver
 echo "Launching StreamReceiver..."
-echo "Note: To disable plotting, change --plot-interval 10 to --plot-interval 0"
+echo ""
+echo "Options:"
+echo "  --plot-interval 10     # Plot every 10 seconds (0 = disable plotting)"
+echo "  --start-webshow        # Enable web interface at http://localhost:9527"
 echo ""
 echo "To test the system before running:"
 echo "  python tests/test_headless_plotting.py  # Test plotting without display"
 echo "  python tests/test_plotting.py           # Test plotting functionality"
 echo "  python tests/test_receiver.py           # Test basic functionality"
 echo ""
-python3 stream_receiver.py --addr 127.0.0.1 --port 9798 --buffer-length 1200 --gc-interval 100 --plot-interval 10 --plot-dir /fast/peijinz/streaming/figs/ --log-level INFO
+echo "Starting with default settings..."
+python3 stream_receiver.py --addr 127.0.0.1 --port 9798 --buffer-length 1200 --gc-interval 100 --plot-interval 30 --plot-dir /fast/peijinz/streaming/figs/ --log-level INFO
+
+echo ""
+echo "To enable web interface, add --start-webshow flag:"
+echo "  python3 stream_receiver.py --start-webshow [other options]"
+echo "Then open http://localhost:9527 in your browser"

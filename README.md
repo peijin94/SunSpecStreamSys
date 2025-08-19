@@ -153,6 +153,59 @@ receiver.set_delay(2.5)  # Set delay to 2.5 seconds
 - Handles errors gracefully and continues operation
 - Integrates with the main shutdown process
 
+## Web Interface
+
+The StreamReceiver now includes an optional web interface for real-time spectrum visualization:
+
+### Features
+
+- **Live Spectrum Display**: Real-time waterfall visualization of incoming data
+- **Interactive Controls**: Adjustable update rate, waterfall height, and color mapping
+- **Multiple Color Palettes**: Turbo, Viridis, and Grayscale options
+- **Responsive Design**: Works on desktop and mobile devices
+- **Fullscreen Mode**: Immersive viewing experience
+- **Performance Monitoring**: Real-time FPS counter and frame statistics
+
+### Enabling the Web Interface
+
+To enable the web interface, add the `--start-webshow` flag when starting the receiver:
+
+```bash
+python3 stream_receiver.py --start-webshow --addr 127.0.0.1 --port 9798
+```
+
+The web interface will be available at `http://localhost:9527`.
+
+### Web Interface Controls
+
+- **Pause/Resume**: Stop or start data updates
+- **Update Rate**: Control how frequently data is fetched (1-60 Hz)
+- **Waterfall Height**: Adjust the number of visible time lines (128-1200)
+- **Floor/Ceiling**: Set dB range for color mapping
+- **Linear Mapping**: Toggle between dB and linear color scaling
+- **Color Palette**: Choose between Turbo, Viridis, and Grayscale
+- **Refresh Data**: Manually fetch latest data
+- **Fullscreen**: Toggle fullscreen mode
+
+### Web Interface Architecture
+
+- **Backend**: Flask web server running in a separate thread
+- **Frontend**: HTML5 Canvas with JavaScript for real-time rendering
+- **Data API**: RESTful endpoints for spectrum data and status
+- **Real-time Updates**: Automatic data fetching and display updates
+- **Ring Buffer Visualization**: Efficient waterfall display using offscreen canvas
+
+### Web Interface Dependencies
+
+The web interface requires additional Python packages:
+- `flask>=2.0.0` - Web framework
+- `flask-cors>=3.0.0` - Cross-origin resource sharing support
+
+Install with:
+```bash
+pip install -r requirements.txt
+```
+
 ## Installation and Setup
 
 ### Prerequisites
@@ -205,6 +258,7 @@ This configuration ensures that plotting works seamlessly on headless servers wh
 - `--gc-interval`: Garbage collection interval in frames (default: 100)
 - `--plot-interval`: Plotting interval in seconds (0 = disable plotting, default: 10)
 - `--plot-dir`: Directory to save plots (default: /fast/peijinz/streaming/figs/)
+- `--start-webshow`: Enable web interface at localhost:9898 (default: False)
 - `--log-level`: Logging level (DEBUG, INFO, WARNING, ERROR)
 
 ### Programmatic Usage
@@ -249,6 +303,21 @@ print(f"Data lag: {current_delay:.3f} seconds")
 receiver.stop()
 ```
 
+# Create receiver with web interface enabled
+receiver_web = StreamReceiver(
+    stream_addr='127.0.0.1',
+    stream_port=9798,
+    buffer_length=1200,
+    plot_interval=0,  # Disable plotting when using web interface
+    start_webshow=True  # Enable web interface
+)
+
+# Start receiving and web server
+receiver_web.start()
+
+# Web interface will be available at http://localhost:9527
+print("Web interface started at http://localhost:9527")
+
 ## Testing
 
 ### Test Ring Buffer Functionality
@@ -283,6 +352,15 @@ This will verify that plotting works correctly on headless servers without displ
 1. Start the OVRO data recorder first
 2. Run the test script and choose to test actual streaming
 3. Monitor the output for data reception
+
+### Test Web Interface
+
+```bash
+cd SunSpecStreamSys
+python tests/test_web_interface.py
+```
+
+This will test the web interface functionality without requiring an active stream.
 
 ## Configuration
 
