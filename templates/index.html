@@ -16,7 +16,7 @@
         .main-container {
             display: flex;
             height: 100vh;
-            padding: 20px;
+            padding: 10px;
             box-sizing: border-box;
         }
         
@@ -27,7 +27,7 @@
             border: 2px solid #333;
             border-radius: 8px;
             margin-right: 20px;
-            padding: 40px;  /* All sides 40px padding */
+            padding: 20px;  /* All sides 40px padding */
         }
         
         .canvas-label {
@@ -91,7 +91,8 @@
             border: 1px solid #1e2732;
             border-radius: 12px;
             padding: 12px;
-            font-size: 12px;
+            font-size: 15px;
+            font-family: monospace;
             color: #9fb0c2;
             min-width: 200px;
         }
@@ -110,14 +111,14 @@
         <div class="canvas-container">
             <canvas id="view"></canvas>
             <div class="time-direction">
-                <span class="time-arrow">↓</span> Now
+                <span class="time-arrow">←</span> Now
             </div>
         </div>
         
         <div class="status">
             <div>Status: <span id="status">Connecting...</span></div>
             <div>Frames: <span id="frameCount">0</span></div>
-            <div>Update Rate: <span id="updateRateDisplay">2.0 Hz</span></div>
+            <div>Update Rate: <span id="updateRateDisplay">2.0 fps</span></div>
             <div>Data Range: 10^4 to 10^9</div>
             <div>Last Update: <span id="lastUpdate">Never</span></div>
         </div>
@@ -134,7 +135,7 @@
 
             // State
             let bins = 1536;           // frequency bins (fixed for LWA data)
-            let heightLines = 640;     // waterfall height (now represents time lines)
+            let heightLines = 600;     // waterfall height (now represents time lines)
             let writeX = heightLines - 1;  // ring buffer write position (right to left)
             let running = true;
             let updateRate = 2.0;      // updates per second (every 0.5s)
@@ -153,7 +154,7 @@
 
             // Fixed update rate - no UI controls needed
             function syncLabels(){
-                updateRateDisplayEl.textContent = updateRate + ' Hz';
+                updateRateDisplayEl.textContent = updateRate + ' fps';
             }
 
             // Resize handling
@@ -188,6 +189,46 @@
                 return Math.max(0, Math.min(255, Math.round(t * 255)));
             }
 
+            // Inferno colormap function (converts intensity 0-255 to RGB)
+            function infernoColormap(intensity) {
+                // Inferno colormap: dark purple -> blue -> orange -> bright yellow
+                const t = intensity / 255;
+                
+                if (t < 0.25) {
+                    // Dark purple to blue
+                    const s = t / 0.25;
+                    return {
+                        r: Math.round(4 * s * (1 - s) * 255),
+                        g: 0,
+                        b: Math.round((1 - 4 * s * (1 - s)) * 255)
+                    };
+                } else if (t < 0.5) {
+                    // Blue to green
+                    const s = (t - 0.25) / 0.25;
+                    return {
+                        r: 0,
+                        g: Math.round(s * 255),
+                        b: Math.round((1 - s) * 255)
+                    };
+                } else if (t < 0.75) {
+                    // Green to orange
+                    const s = (t - 0.5) / 0.25;
+                    return {
+                        r: Math.round(s * 255),
+                        g: Math.round(255),
+                        b: Math.round((1 - s) * 255)
+                    };
+                } else {
+                    // Orange to bright yellow
+                    const s = (t - 0.75) / 0.25;
+                    return {
+                        r: Math.round(255),
+                        g: Math.round(255),
+                        b: Math.round(s * 255)
+                    };
+                }
+            }
+
             // Write data column to texture (for rolling waterfall: left to right)
             function writeRow(dataArray){
                 if (!dataArray || dataArray.length !== bins) return;
@@ -199,10 +240,11 @@
                     // Flip the y index to invert the frequency display
                     const flippedY = bins - 1 - y;
                     const intensity = toIdx(dataArray[y]);
+                    const colors = infernoColormap(intensity);
                     const q = flippedY * 4;
-                    columnData[q] = intensity;     // Red
-                    columnData[q+1] = intensity;   // Green  
-                    columnData[q+2] = intensity;   // Blue
+                    columnData[q] = colors.r;      // Red
+                    columnData[q+1] = colors.g;    // Green  
+                    columnData[q+2] = colors.b;    // Blue
                     columnData[q+3] = 255;         // Alpha
                 }
                 
@@ -225,8 +267,8 @@
                 ctx.clearRect(0, 0, W, H);
                 
                 // Calculate proper scaling to fit the smaller plot area
-                const plotWidth = W - 80;   // Account for left/right padding (40px each)
-                const plotHeight = H - 80;  // Account for top/bottom padding (40px each)
+                const plotWidth = W - 240;   // Account for left/right padding (40px each)
+                const plotHeight = H - 120;  // Account for top/bottom padding (40px each)
                 const scaleX = plotWidth / heightLines;  // Scale time (x-axis) to fit plot width
                 const scaleY = plotHeight / bins;        // Scale frequency (y-axis) to fit plot height
                 
@@ -239,16 +281,16 @@
                 if (leftPortion > 0) {
                     const leftWidth = leftPortion * scaleX;
                     ctx.drawImage(tex, writeX, 0, leftPortion, bins, 
-                                40, 40, leftWidth, plotHeight);  // Position with 40px padding
+                                200, 50, leftWidth, plotHeight);  // Position with 40px padding
                 }
                 
                 // Part 2: Draw the right portion (older data)
                 // This should be from 0 to writeX-1 (right side)
                 if (writeX > 0) {
                     const rightWidth = writeX * scaleX;
-                    const rightX = 40 + leftPortion * scaleX;  // Position with 40px padding
+                    const rightX = 200 + leftPortion * scaleX;  // Position with 40px padding
                     ctx.drawImage(tex, 0, 0, writeX, bins, 
-                                rightX, 40, rightWidth, plotHeight);  // Position with 40px padding
+                                rightX, 50, rightWidth, plotHeight);  // Position with 40px padding
                 }
                 
                 // Add frequency and time scale labels
@@ -260,7 +302,7 @@
             function drawFrequencyScale(canvasWidth, canvasHeight) {
                 ctx.save();
                 ctx.fillStyle = '#9fb0c2';
-                ctx.font = '45px monospace';  // Increased font size
+                ctx.font = '40px monospace';  // Increased font size
                 ctx.textAlign = 'right';
                 
                 // Draw frequency markers vertically (15MHz at top, 85MHz at bottom)
@@ -268,15 +310,15 @@
                 frequencies.forEach(freq => {
                     // Map frequency to y position (15MHz at top, 85MHz at bottom)
                     const freqRatio = (freqMax - freq) / (freqMax - freqMin);
-                    const y = 40 + freqRatio * (canvasHeight - 80);  // Account for 40px padding
-                    ctx.fillText(freq + 'MHz', 35, y + 4);  // Position text outside plot
+                    const y = 50 + freqRatio * (canvasHeight - 120);  // Account for 40px padding
+                    ctx.fillText(freq + 'MHz', 145, y + 4);  // Position text outside plot
                     
                     // Draw horizontal line extending across the plot
                     ctx.strokeStyle = '#333';
                     ctx.lineWidth = 1;
                     ctx.beginPath();
-                    ctx.moveTo(40, y);  // Start from plot edge (40px left padding)
-                    ctx.lineTo(canvasWidth - 40, y);  // End at plot edge (40px right padding)
+                    ctx.moveTo(200, y);  // Start from plot edge (40px left padding)
+                    ctx.lineTo(canvasWidth - 50, y);  // End at plot edge (40px right padding)
                     ctx.stroke();
                 });
                 
@@ -287,23 +329,23 @@
             function drawTimeScale(canvasWidth, canvasHeight) {
                 ctx.save();
                 ctx.fillStyle = '#9fb0c2';
-                ctx.font = '45px monospace';  // Increased font size
+                ctx.font = '40px monospace';  // Increased font size
                 ctx.textAlign = 'center';
                 
                 // Draw time markers horizontally (newest at left, oldest at right)
-                const timeLabels = ['Now', '-150s', '-300s', '-450s', 'Oldest'];
+                const timeLabels = ['Now', '-75s', '-150s', '-225s', '-300s'];
                 timeLabels.forEach((label, index) => {
                     // Map time to x position (newest = left, oldest = right)
                     const timeRatio = (timeLabels.length - 1 - index) / (timeLabels.length - 1);
-                    const x = 40 + timeRatio * (canvasWidth - 80);  // Account for 40px padding
+                    const x = 200 + timeRatio * (canvasWidth - 240);  // Account for 40px padding
                     ctx.fillText(label, x, canvasHeight - 25);  // Position text below plot
                     
                     // Draw vertical line extending up the plot
                     ctx.strokeStyle = '#333';
                     ctx.lineWidth = 1;
                     ctx.beginPath();
-                    ctx.moveTo(x, 40);  // Start from plot edge (40px top padding)
-                    ctx.lineTo(x, canvasHeight - 40);  // End at plot edge (40px bottom padding)
+                    ctx.moveTo(x, 100);  // Start from plot edge (40px top padding)
+                    ctx.lineTo(x, canvasHeight - 70);  // End at plot edge (40px bottom padding)
                     ctx.stroke();
                 });
                 
@@ -319,7 +361,11 @@
                         if (data && data.length > 0) {
                             lastData = data; // Store the data
                             writeRow(data);  // Write to waterfall
-                            lastUpdateEl.textContent = new Date().toLocaleTimeString();
+                            const now = new Date();
+                            const timeStr = now.getUTCHours().toString().padStart(2, '0') + ':' + 
+                                           now.getUTCMinutes().toString().padStart(2, '0') + ':' + 
+                                           now.getUTCSeconds().toString().padStart(2, '0');
+                            lastUpdateEl.textContent = timeStr + '(UTC)';
                             statusEl.textContent = 'Connected';
                             statusEl.className = 'success';
                         }
