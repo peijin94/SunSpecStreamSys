@@ -82,7 +82,7 @@ def test_web_interface():
         # Test 3: Add some test data and check if it's served
         print("\nAdding test data to buffer...")
         for i in range(3):
-            test_data = np.random.random((1536,)).astype(np.float32) * (1 + i * 0.2)
+            test_data = np.random.random((768,)).astype(np.float32) * (1 + i * 0.2)
             receiver.ring_buffer[receiver.buffer_index, :] = test_data
             receiver.buffer_index = (receiver.buffer_index + 1) % receiver.buffer_length
             print(f"  Added frame {i+1}, buffer_index: {receiver.buffer_index}")

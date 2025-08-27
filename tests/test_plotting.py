@@ -42,7 +42,7 @@ def test_plotting_functionality():
         print("Simulating data for plotting test...")
         for i in range(5):
             # Generate some test data
-            test_data = np.random.random((1536,)).astype(np.float32) * (1 + i * 0.1)
+            test_data = np.random.random((768,)).astype(np.float32) * (1 + i * 0.1)
             
             # Manually update buffer (simulating received data)
             receiver.ring_buffer[receiver.buffer_index, :] = test_data
@@ -102,7 +102,7 @@ def test_plot_creation():
     
     # Add some test data
     for i in range(3):
-        test_data = np.random.random((1536,)).astype(np.float32) * (1 + i * 0.2)
+        test_data = np.random.random((768,)).astype(np.float32) * (1 + i * 0.2)
         receiver.ring_buffer[receiver.buffer_index, :] = test_data
         receiver.buffer_index = (receiver.buffer_index + 1) % receiver.buffer_length
     
@@ -146,7 +146,7 @@ def test_disabled_plotting():
         
         # Add some test data
         for i in range(3):
-            test_data = np.random.random((1536,)).astype(np.float32) * (1 + i * 0.2)
+            test_data = np.random.random((768,)).astype(np.float32) * (1 + i * 0.2)
             receiver.ring_buffer[receiver.buffer_index, :] = test_data
             receiver.buffer_index = (receiver.buffer_index + 1) % receiver.buffer_length
         

@@ -68,7 +68,7 @@ def test_ring_buffer():
     )
     
     # Simulate some data updates
-    test_data = np.random.random((1536,)).astype(np.float32)
+    test_data = np.random.random((768,)).astype(np.float32)
     
     print("Simulating data updates...")
     for i in range(10):

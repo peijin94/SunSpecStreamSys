@@ -6,7 +6,7 @@ This document describes the streaming system that consists of an `AvgStreamingOp
 
 The streaming system provides real-time data streaming from the OVRO data recorder to external applications via ZMQ (ZeroMQ). The system:
 
-1. **AvgStreamingOp**: Averages data over time and streams it every 0.5 seconds
+1. **AvgStreamingOp**: Averages data over time and streams it every 0.25 seconds
 2. **StreamReceiver**: Receives the streamed data and maintains a ring buffer
 
 ## Components
@@ -20,7 +20,7 @@ This operation class:
 - Sends data to `localhost:9798` by default
 
 **Key Features:**
-- Configurable streaming interval (default: 0.5s)
+- Configurable streaming interval (default: 0.25s)
 - Configurable destination address and port
 - Automatic data averaging and accumulation
 - ZMQ PUB socket for broadcasting data
@@ -58,11 +58,11 @@ OVRO Data Recorder → AvgStreamingOp → ZMQ Stream → StreamReceiver → Ring
 
 1. **Input**: (ntime_gulp, nbeam, nchan, npol) = (250, 1, 3072, 4)
 2. **Time Averaging**: Average over time axis → (1, 3072, 4)
-3. **Streaming**: Send via ZMQ every 0.5s
+3. **Streaming**: Send via ZMQ every 0.25s
 4. **Reception**: Receive in StreamReceiver
 5. **Processing**: Extract pol=0 → (3072,)
-6. **Frequency Averaging**: Average down by factor of 2 → (1536,)
-7. **Ring Buffer**: Store in 1200 × 1536 circular buffer
+6. **Frequency Averaging**: Average down by factor of 4 → (768,)
+7. **Ring Buffer**: Store in 1200 × 768 circular buffer
 
 ## Plotting System
 
@@ -476,9 +476,9 @@ optimization_result = receiver.optimize_memory()
 
 ## Performance Considerations
 
-- **Streaming interval**: 0.5s provides good balance between real-time updates and system load
-- **Buffer size**: 1200 frames provide ~10 minutes of data history
-- **Memory usage**: Ring buffer uses ~7.4 MB (1200 × 1536 × 4 bytes)
+- **Streaming interval**: 0.25s provides good balance between real-time updates and system load
+- **Buffer size**: 1200 frames provide ~5 minutes of data history
+- **Memory usage**: Ring buffer uses ~3.7 MB (1200 × 768 × 4 bytes)
 - **Network**: ZMQ provides efficient, low-latency data transmission
 
 ## Future Enhancements

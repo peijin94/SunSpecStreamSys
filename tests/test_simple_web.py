@@ -43,7 +43,7 @@ def test_simple_web():
         for i in range(5):
             # Generate data in the specified range
             base_value = 1e4 + (i * 1e8)  # Start at 10^4, increment by 10^8
-            test_data = np.random.uniform(base_value, base_value * 1.1, (1536,)).astype(np.float32)
+            test_data = np.random.uniform(base_value, base_value * 1.1, (768,)).astype(np.float32)
             
             receiver.ring_buffer[receiver.buffer_index, :] = test_data
             receiver.buffer_index = (receiver.buffer_index + 1) % receiver.buffer_length

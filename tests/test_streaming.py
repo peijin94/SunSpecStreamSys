@@ -14,7 +14,7 @@ import threading
 class DummyStreamer:
     """Generate dummy streaming data for testing"""
     
-    def __init__(self, stream_addr='127.0.0.1', stream_port=9798, stream_interval=0.5):
+    def __init__(self, stream_addr='127.0.0.1', stream_port=9798, stream_interval=0.25):
         self.stream_addr = stream_addr
         self.stream_port = stream_port
         self.stream_interval = stream_interval
@@ -135,8 +135,8 @@ def main():
                        help='Stream address (default: 127.0.0.1)')
     parser.add_argument('--port', type=int, default=9798,
                        help='Stream port (default: 9798)')
-    parser.add_argument('--interval', type=float, default=0.5,
-                       help='Streaming interval in seconds (default: 0.5)')
+    parser.add_argument('--interval', type=float, default=0.25,
+                       help='Streaming interval in seconds (default: 0.25)')
     parser.add_argument('--duration', type=int, default=60,
                        help='Duration to stream in seconds (default: 60)')
     

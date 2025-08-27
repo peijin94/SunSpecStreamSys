@@ -118,7 +118,7 @@
         <div class="status">
             <div>Status: <span id="status">Connecting...</span></div>
             <div>Frames: <span id="frameCount">0</span></div>
-            <div>Update Rate: <span id="updateRateDisplay">2.0 fps</span></div>
+            <div>Update Rate: <span id="updateRateDisplay">4.0 fps</span></div>
             <div>Data Range: 10^4 to 10^9</div>
             <div>Last Update: <span id="lastUpdate">Never</span></div>
         </div>
@@ -134,11 +134,11 @@
             let tctx = tex.getContext('2d', { alpha:false, desynchronized:true });
 
             // State
-            let bins = 1536;           // frequency bins (fixed for LWA data)
+            let bins = 768;            // frequency bins (downsampled by factor of 4)
             let heightLines = 600;     // waterfall height (now represents time lines)
             let writeX = heightLines - 1;  // ring buffer write position (right to left)
             let running = true;
-            let updateRate = 2.0;      // updates per second (every 0.5s)
+            let updateRate = 4.0;      // updates per second (every 0.25s)
             let dataMin = 1e4;         // minimum data value (10^4)
             let dataMax = 1e9;         // maximum data value (10^9)
             let freqMin = 15;          // minimum frequency in MHz
@@ -172,11 +172,11 @@
             // Texture management
             let columnImage = null;
             function recreateTexture(){
-                tex.width = heightLines;  // Width = time lines (640)
-                tex.height = bins;        // Height = frequency bins (1536)
+                tex.width = heightLines;  // Width = time lines (600)
+                tex.height = bins;        // Height = frequency bins (768)
                 tctx.fillStyle = '#000';
                 tctx.fillRect(0,0,tex.width, tex.height);
-                columnImage = tctx.createImageData(1, bins);  // 1 pixel wide, bins tall
+                columnImage = tctx.createImageData(1, bins);  // 1 pixel wide, 768 bins tall
                 writeX = heightLines - 1;  // Start from rightmost column
             }
 

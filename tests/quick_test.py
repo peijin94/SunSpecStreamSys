@@ -17,7 +17,7 @@ def test_streaming_system():
     
     # Create dummy streamer
     print("1. Creating dummy streamer...")
-    streamer = DummyStreamer(stream_interval=0.5)
+    streamer = DummyStreamer(stream_interval=0.25)
     
     # Create receiver
     print("2. Creating receiver...")

@@ -83,8 +83,8 @@ class StreamReceiver:
         self.socket.connect(f"tcp://{self.stream_addr}:{self.stream_port}")
         self.socket.setsockopt(zmq.SUBSCRIBE, b"")  # Subscribe to all messages
         
-        # Ring buffer: 1200 x 1536 (N_freq/2)
-        self.ring_buffer = np.zeros((buffer_length, 1536), dtype=np.float32)
+        # Ring buffer: 1200 x 768 (N_freq/4)
+        self.ring_buffer = np.zeros((buffer_length, 768), dtype=np.float32)
         self.buffer_index = 0
         
         # Data processing parameters
@@ -268,13 +268,13 @@ class StreamReceiver:
             # Reshape to (1, 3072, 4)
             frame_data = frame_data.reshape(1, self.N_freq, self.N_pol)
             
-            # Extract pol=0 and average down to N_freq/2 = 1536
+            # Extract pol=0 and average down to N_freq/4 = 768
             pol_data = frame_data[0, :, self.pol_index]  # Shape: (3072,)
             
-            # Average down by factor of 2
-            # Reshape to (1536, 2) and take mean along axis 1
-            pol_data_reshaped = pol_data.reshape(1536, 2)
-            averaged_data = np.mean(pol_data_reshaped, axis=1)  # Shape: (1536,)
+            # Average down by factor of 4
+            # Reshape to (768, 4) and take mean along axis 1
+            pol_data_reshaped = pol_data.reshape(768, 4)
+            averaged_data = np.mean(pol_data_reshaped, axis=1)  # Shape: (768,)
             
             # Update ring buffer
             self.ring_buffer[self.buffer_index, :] = averaged_data
@@ -705,7 +705,7 @@ def main():
                        help='Ring buffer length (default: 1200)')
     parser.add_argument('--gc-interval', type=int, default=100,
                        help='Garbage collection interval in frames (default: 100)')
-    parser.add_argument('--plot-interval', type=int, default=10,
+    parser.add_argument('--plot-interval', type=int, default=0, # by default, no plotting 
                        help='Plotting interval in seconds (0 = disable plotting, default: 10)')
     parser.add_argument('--plot-dir', type=str, default='/fast/peijinz/streaming/figs/',
                        help='Directory to save plots (default: /fast/peijinz/streaming/figs/)')
