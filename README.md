@@ -16,7 +16,7 @@ The streaming system provides real-time data streaming from the OVRO data record
 This operation class:
 - Reads power spectra data from the input ring
 - Averages data over time (axis=0)
-- Streams averaged data via ZMQ every 0.5 seconds
+- Streams averaged data via ZMQ every 0.25 seconds
 - Sends data to `localhost:9798` by default
 
 **Key Features:**
@@ -33,14 +33,14 @@ The `AvgStreamingOp` is automatically added to the pipeline when running `dr_bea
 This receiver class:
 - Connects to the ZMQ stream from `AvgStreamingOp`
 - Processes incoming data frames
-- Maintains a ring buffer of 1200 × 1536 data points
+- Maintains a ring buffer of 1200 × 768 data points
 - Can be started/stopped at any time
 - **NEW**: Automatically generates and saves plots every 10 seconds
 
 **Key Features:**
 - Automatic connection to streaming source
 - Ring buffer with configurable length (default: 1200)
-- Data processing: extracts pol=0 and averages down to N_freq/2
+- Data processing: extracts pol=0 and averages down to N_freq/4
 - Thread-safe operation with proper shutdown handling
 - Automatic garbage collection to reduce memory overhead
 - Memory usage monitoring and optimization
@@ -73,7 +73,7 @@ The StreamReceiver now includes an automatic plotting system that generates visu
 1. **Latest Spectrum Plot** (top panel):
    - Shows the most recent power spectrum
    - **Log scale** for better dynamic range visualization
-   - X-axis: Frequency channels (0-1535)
+   - X-axis: Frequency channels (0-767)
    - Y-axis: Power values (logarithmic scale)
    - Includes timestamp and lag information
    - Grid overlay for easy reading
@@ -83,7 +83,7 @@ The StreamReceiver now includes an automatic plotting system that generates visu
    - **X-axis: Time** (most recent at right)
    - **Y-axis: Frequency channels**
    - **Log-scale color mapping** for better dynamic range
-   - Color-coded power values using viridis colormap
+   - Color-coded power values using inferno colormap
    - Includes colorbar and time/lag information
 
 ### Plot Features
@@ -176,17 +176,6 @@ python3 stream_receiver.py --start-webshow --addr 127.0.0.1 --port 9798
 
 The web interface will be available at `http://localhost:9527`.
 
-### Web Interface Controls
-
-- **Pause/Resume**: Stop or start data updates
-- **Update Rate**: Control how frequently data is fetched (1-60 Hz)
-- **Waterfall Height**: Adjust the number of visible time lines (128-1200)
-- **Floor/Ceiling**: Set dB range for color mapping
-- **Linear Mapping**: Toggle between dB and linear color scaling
-- **Color Palette**: Choose between Turbo, Viridis, and Grayscale
-- **Refresh Data**: Manually fetch latest data
-- **Fullscreen**: Toggle fullscreen mode
-
 ### Web Interface Architecture
 
 - **Backend**: Flask web server running in a separate thread
@@ -236,6 +225,16 @@ This configuration ensures that plotting works seamlessly on headless servers wh
 
 ## Usage
 
+### To run the capture service
+
+Do:
+
+```bash
+python3 stream_receiver.py --start-webshow --addr [address] --port 9798
+```
+
+The `[address]` should be `127.0.0.1` if this is on local machine (calim02).
+
 ### Starting the Stream
 
 1. **Start the OVRO data recorder** (this will automatically start `AvgStreamingOp`):
@@ -258,7 +257,7 @@ This configuration ensures that plotting works seamlessly on headless servers wh
 - `--gc-interval`: Garbage collection interval in frames (default: 100)
 - `--plot-interval`: Plotting interval in seconds (0 = disable plotting, default: 10)
 - `--plot-dir`: Directory to save plots (default: /fast/peijinz/streaming/figs/)
-- `--start-webshow`: Enable web interface at localhost:9898 (default: False)
+- `--start-webshow`: Enable web interface at localhost:9527 (default: False)
 - `--log-level`: Logging level (DEBUG, INFO, WARNING, ERROR)
 
 ### Programmatic Usage
@@ -317,50 +316,7 @@ receiver_web.start()
 
 # Web interface will be available at http://localhost:9527
 print("Web interface started at http://localhost:9527")
-
-## Testing
-
-### Test Ring Buffer Functionality
-
-```bash
-cd SunSpecStreamSys
-python tests/test_receiver.py
 ```
-
-This will test the ring buffer functionality without requiring an active stream.
-
-### Test Plotting Functionality
-
-```bash
-cd SunSpecStreamSys
-python tests/test_plotting.py
-```
-
-This will test the plotting system without requiring an active stream.
-
-### Test Headless Plotting
-
-```bash
-cd SunSpecStreamSys
-python tests/test_headless_plotting.py
-```
-
-This will verify that plotting works correctly on headless servers without display issues.
-
-### Test with Active Stream
-
-1. Start the OVRO data recorder first
-2. Run the test script and choose to test actual streaming
-3. Monitor the output for data reception
-
-### Test Web Interface
-
-```bash
-cd SunSpecStreamSys
-python tests/test_web_interface.py
-```
-
-This will test the web interface functionality without requiring an active stream.
 
 ## Configuration
 
@@ -404,87 +360,9 @@ The `StreamReceiver` provides status information:
 - Garbage collection statistics
 - Memory optimization status
 
-## Troubleshooting
-
-### Common Issues
-
-1. **Connection refused**: Ensure `AvgStreamingOp` is running and streaming
-2. **No data received**: Check ZMQ socket configuration and firewall settings
-3. **Buffer overflow**: Adjust buffer length or processing frequency
-4. **High CPU usage**: Check streaming interval and data processing efficiency
-
-### Display and Matplotlib Issues
-
-5. **"Could not connect to display" error**: 
-   - This is normal on headless servers
-   - The system automatically uses the 'Agg' backend
-   - Plots are saved to files without displaying
-   - No action needed
-
-6. **"QApplication was not created in the main() thread" warning**:
-   - This warning is harmless on headless servers
-   - Matplotlib automatically handles threading issues
-   - Plots will still be generated and saved correctly
-
-7. **"UserWarning: Starting a Matplotlib GUI outside of the main thread"**:
-   - This warning is expected and can be ignored
-   - The plotting system is designed to work in background threads
-   - No impact on functionality
-
-### Delay Calculation Issues
-
-8. **Large negative delays (e.g., -342329810474.9s)**:
-   - This indicates invalid `time_tag` values in the header data
-   - The system automatically falls back to buffer-based calculation
-   - Check header data format and `time_tag` values
-   - Use `receiver.set_delay_calculation_method('buffer')` for reliable timing
-   - Run `python tests/debug_time_tag.py` to diagnose time format issues
-
-9. **Large positive delays (>1 hour)**:
-   - This is normal for LWA systems using timestamps from earlier observations
-   - The delay represents the time difference between data timestamp and current time
-   - System automatically handles LWA timestamp conversion using `lwa_time_tag_to_datetime()`
-   - Use `receiver.set_delay_calculation_method('buffer')` if you prefer relative timing
-
-### Debug Mode
-
-Enable debug logging for detailed information:
-```bash
-python stream_receiver.py --log-level DEBUG
-```
-
-### Memory Optimization
-
-The `StreamReceiver` includes several memory optimization features:
-
-- **Automatic Garbage Collection**: Runs every N frames (configurable via `--gc-interval`)
-- **Memory Monitoring**: Track RSS memory usage and object counts
-- **Manual Optimization**: Call `optimize_memory()` to clear old data and force GC
-- **Memory Statistics**: Get detailed memory usage information
-
-```python
-# Get memory information
-memory_info = receiver.get_memory_info()
-print(f"Memory usage: {memory_info['rss_mb']:.1f}MB")
-
-# Force garbage collection
-collected = receiver.force_garbage_collection()
-
-# Optimize memory usage
-optimization_result = receiver.optimize_memory()
-```
-
 ## Performance Considerations
 
 - **Streaming interval**: 0.25s provides good balance between real-time updates and system load
 - **Buffer size**: 1200 frames provide ~5 minutes of data history
 - **Memory usage**: Ring buffer uses ~3.7 MB (1200 × 768 × 4 bytes)
 - **Network**: ZMQ provides efficient, low-latency data transmission
-
-## Future Enhancements
-
-- Configurable data processing pipelines
-- Multiple output formats
-- Real-time visualization
-- Data persistence and archiving
-- Network compression and optimization
