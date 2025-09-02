@@ -294,23 +294,23 @@ class StreamReceiver:
             elif self.delay_method == 'auto':
                 current_time_utc = Time.now().unix
                 
-                # Use header["timestamp"] for delay calculation
+                # Use header["timestamp"] for delay calculation (new format from dr_beam.py)
                 if "timestamp" in header:
-                    timestamp_str = header["timestamp"]
-                    self.log.debug(f"Using header timestamp: {timestamp_str}")
+                    timestamp_val = header["timestamp"]
+                    self.log.debug(f"Using header timestamp: {timestamp_val}")
                     
                     try:
                         # Parse timestamp string (format: "1755552894.787341")
-                        header_time = float(timestamp_str)
+                        header_time = float(timestamp_val)
                         self.delay = current_time_utc - header_time
                         self.log.debug(f"Calculated delay: {self.delay:.6f}s")
                         
                         # Sanity check for unreasonable delays
                         if abs(self.delay) > 3600 or self.delay < 0:
-                            self.log.warning(f"Unreasonable delay calculated: {self.delay:.3f}s, timestamp: {timestamp_str}, header_time: {header_time}, current_utc: {current_time_utc:.6f}")
+                            self.log.warning(f"Unreasonable delay calculated: {self.delay:.3f}s, timestamp: {timestamp_val}, header_time: {header_time}, current_utc: {current_time_utc:.6f}")
                             self.delay = 0.0
                     except (ValueError, TypeError) as e:
-                        self.log.warning(f"Could not parse timestamp: {timestamp_str}, error: {e}")
+                        self.log.warning(f"Could not parse timestamp: {timestamp_val}, error: {e}")
                         self.delay = 0.0
                 else:
                     self.log.warning("No 'timestamp' found in header, using fallback delay calculation")
@@ -323,7 +323,9 @@ class StreamReceiver:
                     self.log.info(f"Using fallback delay calculation: {relative_delay:.3f}s (buffer-based)")
                     self.delay = relative_delay
             
-            self.log.debug(f"Processed frame: time_tag={header.get('time_tag', 'N/A')}, "
+            self.log.debug(f"Processed frame: timestamp={header.get('timestamp', 'N/A')}, "
+                          f"last_block_time={header.get('last_block_time', 'N/A')}, "
+                          f"time_tag={header.get('time_tag', 'N/A')}, "
                           f"buffer_index={self.buffer_index}, data_shape={averaged_data.shape}, delay={self.delay:.3f}s")
             
             # Clean up temporary objects to reduce memory overhead
@@ -477,14 +479,14 @@ class StreamReceiver:
         
         current_time = time.time()
         
-        # Check for timestamp field
+        # Check for timestamp field 
         if "timestamp" in header:
-            timestamp_str = header["timestamp"]
-            self.log.info(f"  Header timestamp: {timestamp_str} (type: {type(timestamp_str)})")
+            timestamp_val = header["timestamp"]
+            self.log.info(f"  Header timestamp: {timestamp_val} (type: {type(timestamp_val)})")
             
             try:
                 # Parse timestamp string (format: "1755552894.787341")
-                header_time = float(timestamp_str)
+                header_time = float(timestamp_val)
                 self.log.info(f"  Parsed timestamp: {header_time:.6f}s")
                 
                 # Calculate delay
@@ -501,13 +503,13 @@ class StreamReceiver:
                 self.log.info(f"  ✗ Could not parse timestamp: {e}")
         else:
             self.log.info("  No 'timestamp' field found in header")
-            
-        # Also check for time_tag field for backward compatibility
-        if "time_tag" in header:
-            time_tag = header["time_tag"]
-            self.log.info(f"  Header time_tag (legacy): {time_tag} (type: {type(time_tag)})")
+        
+        # Check for last_block_time field (new from dr_beam.py)
+        if "last_block_time" in header:
+            last_block_time = header["last_block_time"]
+            self.log.info(f"  Header last_block_time: {last_block_time} (type: {type(last_block_time)})")
         else:
-            self.log.info("  No 'time_tag' field found in header")
+            self.log.info("  No 'last_block_time' field found in header")
         
         self.log.info("=== End Header Debug ===")
     

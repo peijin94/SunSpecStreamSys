@@ -15,6 +15,7 @@ echo "GC Interval: 100 frames"
 echo "Plot Interval: 10 seconds"
 echo "Plot Directory: /fast/peijinz/streaming/figs/"
 echo "Matplotlib Backend: $MPLBACKEND (headless mode)"
+echo "Header Format: Updated for dr_beam.py compatibility"
 echo ""
 
 # Check if Python is available

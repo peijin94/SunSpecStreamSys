@@ -2,12 +2,6 @@
 
 This document describes the streaming system that consists of an `AvgStreamingOp` in the OVRO data recorder and a `StreamReceiver` in the SunSpecStreamSys repository.
 
-## Overview
-
-The streaming system provides real-time data streaming from the OVRO data recorder to external applications via ZMQ (ZeroMQ). The system:
-
-1. **AvgStreamingOp**: Averages data over time and streams it every 0.25 seconds
-2. **StreamReceiver**: Receives the streamed data and maintains a ring buffer
 
 ## Components
 
@@ -58,85 +52,22 @@ OVRO Data Recorder → AvgStreamingOp → ZMQ Stream → StreamReceiver → Ring
 
 1. **Input**: (ntime_gulp, nbeam, nchan, npol) = (250, 1, 3072, 4)
 2. **Time Averaging**: Average over time axis → (1, 3072, 4)
-3. **Streaming**: Send via ZMQ every 0.25s
+3. **Streaming**: Send via ZMQ every 0.25s with updated header format
 4. **Reception**: Receive in StreamReceiver
 5. **Processing**: Extract pol=0 → (3072,)
 6. **Frequency Averaging**: Average down by factor of 4 → (768,)
 7. **Ring Buffer**: Store in 1200 × 768 circular buffer
 
-## Plotting System
+### Header Format
 
-The StreamReceiver now includes an automatic plotting system that generates visualizations every 10 seconds (configurable):
+The streaming header now includes:
+- `timestamp`: Current time when message is created (float, seconds since epoch)
+- `last_block_time`: Last block processing time (string, LWA time format)
+- `time_tag`: Legacy time tag from LWA system
+- `nbeam`, `nchan`, `npol`: Data dimensions
+- `data_shape`: Shape of the averaged data
+- `data_type`: Data type specification
 
-### Plot Types
-
-1. **Latest Spectrum Plot** (top panel):
-   - Shows the most recent power spectrum
-   - **Log scale** for better dynamic range visualization
-   - X-axis: Frequency channels (0-767)
-   - Y-axis: Power values (logarithmic scale)
-   - Includes timestamp and lag information
-   - Grid overlay for easy reading
-
-2. **Waterfall Plot** (bottom panel):
-   - **Time vs Frequency visualization** of recent data
-   - **X-axis: Time** (most recent at right)
-   - **Y-axis: Frequency channels**
-   - **Log-scale color mapping** for better dynamic range
-   - Color-coded power values using inferno colormap
-   - Includes colorbar and time/lag information
-
-### Plot Features
-
-- **Log Scales**: Both power spectrum and waterfall use logarithmic scaling for better dynamic range
-- **Real-time Delay Tracking**: Automatically tracks delay between data timestamp and current time using header time_tag
-- **Multiple Delay Methods**: Configurable delay calculation (auto, buffer-based, or manual)
-- **Lag Information**: Titles show actual data lag in real-time (not estimated)
-- **Orientation**: Waterfall plot shows time progression horizontally (left to right)
-- **Dynamic Range**: Automatic y-axis limits based on data percentiles for optimal viewing
-- **Real-time Updates**: Delay information updates with each new data frame
-- **Robust Error Handling**: Automatic fallback to buffer-based calculation if timestamp parsing fails
-- **LWA Timestamp Support**: Direct parsing of fixed-format timestamp strings (e.g., "1755552894.787341")
-- **UTC Time Consistency**: All timestamps and delay calculations use UTC time via AstroPy Time module for consistency across timezones
-
-### Delay Calculation Methods
-
-The system supports three methods for calculating the delay between data timestamp and current time:
-
-1. **`auto` (default)**: 
-   - Uses `header["timestamp"]` field for accurate delay calculation
-   - Automatically detects LWA time tag format and converts to UTC
-   - Falls back to buffer-based calculation if timestamp parsing fails
-   - Provides real-time delay updates with each data frame
-
-2. **`buffer`**: 
-   - Uses relative buffer position for delay estimation
-   - Calculates: `(buffer_length - buffer_index) * streaming_interval`
-   - Useful when timestamp information is unavailable or unreliable
-
-3. **`manual`**: 
-   - Uses manually set delay value via `receiver.set_delay(seconds)`
-   - Useful for testing or when you want to override automatic calculation
-
-#### LWA System Support
-
-The system now properly handles **LWA timestamps**:
-- **Fixed format**: `header["timestamp"]` is always a string like `"1755552894.787341"`
-- **Direct parsing**: Converts timestamp string directly to float using `float(timestamp_str)`
-- **UTC timing**: All delay calculations use UTC time via AstroPy Time module
-- **Example timestamp**: `"1755552894.787341"` represents seconds since 1970-01-01 UTC
-- **Simple conversion**: No complex tick calculations needed - direct epoch time comparison
-
-**Usage:**
-```python
-# Set delay calculation method
-receiver.set_delay_calculation_method('buffer')  # Always use buffer-based
-receiver.set_delay_calculation_method('manual')  # Use manual setting
-receiver.set_delay_calculation_method('auto')    # Default: try time_tag, fallback to buffer
-
-# Manually set delay
-receiver.set_delay(2.5)  # Set delay to 2.5 seconds
-```
 
 ### Plot Configuration
 
@@ -313,10 +244,7 @@ receiver_web = StreamReceiver(
 
 # Start receiving and web server
 receiver_web.start()
-
-# Web interface will be available at http://localhost:9527
-print("Web interface started at http://localhost:9527")
-```
+Web interface will be available at http://localhost:9527
 
 ## Configuration
 
@@ -352,17 +280,3 @@ The `StreamReceiver` provides status information:
 - Latest data statistics
 - **Current delay between data timestamp and real-time**
 
-### Performance Metrics
-
-- Data processing time
-- Buffer update frequency
-- Memory usage (ring buffer size)
-- Garbage collection statistics
-- Memory optimization status
-
-## Performance Considerations
-
-- **Streaming interval**: 0.25s provides good balance between real-time updates and system load
-- **Buffer size**: 1200 frames provide ~5 minutes of data history
-- **Memory usage**: Ring buffer uses ~3.7 MB (1200 × 768 × 4 bytes)
-- **Network**: ZMQ provides efficient, low-latency data transmission
