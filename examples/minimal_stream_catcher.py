@@ -110,26 +110,7 @@ def main():
         context.term()
         print("ZMQ connection closed")
 
-def print_header_info(header):
-    """Print detailed header information"""
-    print("\n=== Header Information ===")
-    for key, value in header.items():
-        print(f"  {key}: {value}")
-    print("========================\n")
-
-def analyze_data_structure(frame_data, header):
-    """Analyze the structure of received data"""
-    print(f"\n=== Data Analysis ===")
-    print(f"Shape: {frame_data.shape}")
-    print(f"Data type: {frame_data.dtype}")
-    print(f"Memory size: {frame_data.nbytes} bytes")
-    
-    # Analyze each polarization
-    for pol in range(header['npol']):
-        pol_data = frame_data[0, :, pol]
-        print(f"Pol {pol}: min={pol_data.min():.6f}, max={pol_data.max():.6f}, mean={pol_data.mean():.6f}")
-    
-    print("=====================\n")
-
 if __name__ == "__main__":
     main()
+
+
