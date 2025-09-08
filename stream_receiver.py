@@ -64,7 +64,7 @@ class StreamReceiver:
     """
     
     def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=1200, gc_interval=100, 
-                 plot_interval=10, plot_dir='/fast/peijinz/streaming/figs/', start_webshow=False):
+                 plot_interval=10, plot_dir='/fast/peijinz/streaming/figs/', start_webshow=False, streaming_interval=0.25):
         self.stream_addr = stream_addr
         self.stream_port = stream_port
         self.buffer_length = buffer_length
@@ -72,6 +72,7 @@ class StreamReceiver:
         self.plot_interval = plot_interval  # Plotting interval in seconds (0 = skip plotting)
         self.plot_dir = plot_dir  # Directory to save plots
         self.start_webshow = start_webshow # Flag to start web server
+        self.streaming_interval = streaming_interval  # Streaming interval in seconds per frame
         
         # Create plot directory if it doesn't exist and plotting is enabled
         if self.plot_interval > 0:
@@ -288,8 +289,7 @@ class StreamReceiver:
                 pass
             elif self.delay_method == 'buffer':
                 # Always use buffer-based calculation
-                streaming_interval = 0.5  # seconds per frame
-                self.delay = (self.buffer_length - self.buffer_index) * streaming_interval
+                self.delay = (self.buffer_length - self.buffer_index) * self.streaming_interval
                 self.log.debug(f"Buffer-based delay: {self.delay:.3f}s")
             elif self.delay_method == 'auto':
                 current_time_utc = Time.now().unix
@@ -318,8 +318,7 @@ class StreamReceiver:
                 
                 # Fallback to buffer-based calculation if delay is unreasonable
                 if abs(self.delay) > 3600 or self.delay < 0:
-                    streaming_interval = 0.5
-                    relative_delay = (self.buffer_length - self.buffer_index) * streaming_interval
+                    relative_delay = (self.buffer_length - self.buffer_index) * self.streaming_interval
                     self.log.info(f"Using fallback delay calculation: {relative_delay:.3f}s (buffer-based)")
                     self.delay = relative_delay
             
@@ -367,10 +366,12 @@ class StreamReceiver:
                             self.log.debug("Garbage collection performed")
                     else:
                         self.log.warning(f"Unknown topic: {topic}")
+
+                    self.log.info(f"Received message: {topic} first 10 numbers: {data[:10]}")
                 
             except zmq.Again:
                 # No message available (non-blocking)
-                time.sleep(0.001)  # Small sleep to prevent busy waiting
+                time.sleep(0.005)  # Small sleep to prevent busy waiting
                 continue
             except Exception as e:
                 self.log.error(f"Error in receive loop: {str(e)}")
@@ -716,6 +717,8 @@ def main():
                        help='Log level (default: INFO)')
     parser.add_argument('--start-webshow', action='store_true',
                        help='Start a web server on localhost:9898 to display live spectrum data')
+    parser.add_argument('--streaming-interval', type=float, default=0.5,
+                       help='Streaming interval in seconds per frame (default: 0.5)')
     
     args = parser.parse_args()
     
@@ -734,7 +737,8 @@ def main():
         gc_interval=args.gc_interval,
         plot_interval=args.plot_interval,
         plot_dir=args.plot_dir,
-        start_webshow=args.start_webshow
+        start_webshow=args.start_webshow,
+        streaming_interval=args.streaming_interval
     )
     
     try:

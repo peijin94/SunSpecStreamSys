@@ -140,7 +140,7 @@
             let running = true;
             let updateRate = 4.0;      // updates per second (every 0.25s)
             let dataMin = 1e4;         // minimum data value (10^4)
-            let dataMax = 1e9;         // maximum data value (10^9)
+            let dataMax = 1e8;         // maximum data value (10^9)
             let freqMin = 15;          // minimum frequency in MHz
             let freqMax = 85;          // maximum frequency in MHz
             let lastData = null;
@@ -186,13 +186,13 @@
                 if (v > dataMax) v = dataMax;
                 const logV = Math.log(v) / Math.LN10;
                 const t = (logV - Math.log(dataMin) / Math.LN10) / ((Math.log(dataMax) / Math.LN10) - (Math.log(dataMin) / Math.LN10));
-                return Math.max(0, Math.min(255, Math.round(t * 255)));
+                return t ;// Math.max(0, Math.min(255, Math.round(t * 255)));
             }
 
             // Inferno colormap function (converts intensity 0-255 to RGB)
             function infernoColormap(intensity) {
                 // Inferno colormap: dark purple -> blue -> orange -> bright yellow
-                const t = intensity / 255;
+                const t = intensity ;
                 
                 if (t < 0.25) {
                     // Dark purple to blue
@@ -344,8 +344,8 @@
                     ctx.strokeStyle = '#333';
                     ctx.lineWidth = 1;
                     ctx.beginPath();
-                    ctx.moveTo(x, 100);  // Start from plot edge (40px top padding)
-                    ctx.lineTo(x, canvasHeight - 70);  // End at plot edge (40px bottom padding)
+                    ctx.moveTo(x, 70);  // Start from plot edge (40px top padding)
+                    ctx.lineTo(x, canvasHeight - 30);  // End at plot edge (40px bottom padding)
                     ctx.stroke();
                 });
                 
