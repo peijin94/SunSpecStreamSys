@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+tests/stress_test_results/*
+
 # C extensions
 *.so
 

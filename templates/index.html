@@ -138,7 +138,7 @@
             let heightLines = 600;     // waterfall height (now represents time lines)
             let writeX = heightLines - 1;  // ring buffer write position (right to left)
             let running = true;
-            let updateRate = 4.0;      // updates per second (every 0.25s)
+            let updateRate = 2.0;      // updates per second (every 0.5s)
             let dataMin = 1e4;         // minimum data value (10^4)
             let dataMax = 1e8;         // maximum data value (10^9)
             let freqMin = 15;          // minimum frequency in MHz
@@ -355,7 +355,7 @@
             // Data fetching
             async function fetchData(){
                 try {
-                    const response = await fetch('/data');
+                    const response = await fetch('/live/data');
                     if (response.ok) {
                         const data = await response.json();
                         if (data && data.length > 0) {

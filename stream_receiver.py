@@ -27,10 +27,14 @@ import matplotlib.dates as mdates
 try:
     from flask import Flask, render_template, jsonify, Response
     from flask_cors import CORS
+    from waitress import serve
+    import threading
     FLASK_AVAILABLE = True
-except ImportError:
+    WAITRESS_AVAILABLE = True
+except ImportError as e:
     FLASK_AVAILABLE = False
-    print("Warning: Flask not available. Web interface will be disabled.")
+    WAITRESS_AVAILABLE = False
+    print(f"Warning: Web server dependencies not available ({e}). Web interface will be disabled.")
 
 def lwa_time_tag_to_datetime(time_tag: int, rate: float = 196_000_000) -> datetime:
     """
@@ -64,7 +68,7 @@ class StreamReceiver:
     """
     
     def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=1200, gc_interval=100, 
-                 plot_interval=10, plot_dir='/fast/peijinz/streaming/figs/', start_webshow=False, streaming_interval=0.25):
+                 plot_interval=10, plot_dir='/fast/peijinz/streaming/figs/', start_webshow=False, streaming_interval=0.25, verbose=False):
         self.stream_addr = stream_addr
         self.stream_port = stream_port
         self.buffer_length = buffer_length
@@ -73,7 +77,8 @@ class StreamReceiver:
         self.plot_dir = plot_dir  # Directory to save plots
         self.start_webshow = start_webshow # Flag to start web server
         self.streaming_interval = streaming_interval  # Streaming interval in seconds per frame
-        
+        self.verbose = verbose
+
         # Create plot directory if it doesn't exist and plotting is enabled
         if self.plot_interval > 0:
             os.makedirs(self.plot_dir, exist_ok=True)
@@ -109,15 +114,11 @@ class StreamReceiver:
         # Setup logging
         self.setup_logging()
         
-        self.log.info(f"StreamReceiver initialized: {stream_addr}:{stream_port}, buffer: {buffer_length}x1536")
+        self.log.info(f"StreamReceiver initialized: {stream_addr}:{stream_port}")
         if self.plot_interval > 0:
-            self.log.info(f"Plotting enabled: every {plot_interval}s to {plot_dir}")
-        else:
-            self.log.info("Plotting disabled (plot_interval=0)")
+            self.log.info(f"Plotting enabled: every {plot_interval}s")
         if self.start_webshow:
-            self.log.info("Web server enabled (localhost:9898)")
-        else:
-            self.log.info("Web server disabled (start_webshow=False)")
+            self.log.info("Web server enabled")
     
     def setup_logging(self):
         """Setup logging configuration"""
@@ -219,15 +220,14 @@ class StreamReceiver:
             plt.savefig(filename, dpi=150, bbox_inches='tight')
             plt.close(fig)
             
-            self.log.info(f"Plot saved: {filename}")
+            if self.verbose:
+                self.log.info(f"Plot saved: {filename}")
             
         except Exception as e:
             self.log.error(f"Error creating plot: {str(e)}")
     
     def plot_loop(self):
         """Main plotting loop that runs in a separate thread"""
-        self.log.info("Starting plotting loop...")
-        
         while not self.plot_shutdown_event.is_set():
             try:
                 # Create plot if enough time has passed
@@ -239,8 +239,6 @@ class StreamReceiver:
             except Exception as e:
                 self.log.error(f"Error in plotting loop: {str(e)}")
                 time.sleep(1)
-        
-        self.log.info("Plotting loop stopped")
     
     def process_frame(self, data, header):
         """
@@ -254,8 +252,8 @@ class StreamReceiver:
             Header information including time_tag
         """
         try:
-            # Debug header information (only for first few frames to avoid spam)
-            if self.buffer_index < 1:  # Only debug first 1 frames
+            # Debug header information (only for first frame to avoid spam)
+            if self.buffer_index < 1 and self.verbose:  # Only debug first frame if verbose
                 self.debug_header_info(header)
             # Convert bytes back to numpy array
             # Expected shape: (1, N_freq, N_pol) = (1, 3072, 4)
@@ -322,10 +320,8 @@ class StreamReceiver:
                     self.log.info(f"Using fallback delay calculation: {relative_delay:.3f}s (buffer-based)")
                     self.delay = relative_delay
             
-            self.log.debug(f"Processed frame: timestamp={header.get('timestamp', 'N/A')}, "
-                          f"last_block_time={header.get('last_block_time', 'N/A')}, "
-                          f"time_tag={header.get('time_tag', 'N/A')}, "
-                          f"buffer_index={self.buffer_index}, data_shape={averaged_data.shape}, delay={self.delay:.3f}s")
+            if self.verbose:
+                self.log.debug(f"Processed frame: buffer_index={self.buffer_index}, delay={self.delay:.3f}s")
             
             # Clean up temporary objects to reduce memory overhead
             del frame_data, pol_data, pol_data_reshaped, averaged_data
@@ -335,8 +331,6 @@ class StreamReceiver:
     
     def receive_loop(self):
         """Main receive loop"""
-        self.log.info("Starting receive loop...")
-        
         # Garbage collection counters
         gc_counter = 0
         
@@ -363,11 +357,11 @@ class StreamReceiver:
                         if gc_counter >= self.gc_interval:
                             gc.collect()
                             gc_counter = 0
-                            self.log.debug("Garbage collection performed")
                     else:
                         self.log.warning(f"Unknown topic: {topic}")
 
-                    self.log.info(f"Received message: {topic} first 10 numbers: {data[:10]}")
+                    if self.verbose:    
+                        self.log.info(f"Received message: {topic} first 10 numbers: {data[:10]}")
                 
             except zmq.Again:
                 # No message available (non-blocking)
@@ -379,7 +373,6 @@ class StreamReceiver:
         
         # Final garbage collection before stopping
         gc.collect()
-        self.log.info("Receive loop stopped")
     
     def start(self):
         """Start the receiver"""
@@ -400,16 +393,12 @@ class StreamReceiver:
             self.plot_shutdown_event.clear()
             self.plot_thread = threading.Thread(target=self.plot_loop, daemon=True)
             self.plot_thread.start()
-            self.log.info("StreamReceiver started (including plotting)")
-        else:
-            self.log.info("StreamReceiver started (plotting disabled)")
         
         # Start web server only if enabled
         if self.start_webshow:
             self.start_webserver()
-            self.log.info("Web server started")
-        else:
-            self.log.info("Web server disabled (start_webshow=False)")
+        
+        self.log.info("StreamReceiver started")
     
     def stop(self):
         """Stop the receiver"""
@@ -417,7 +406,6 @@ class StreamReceiver:
             self.log.warning("Receiver is not running")
             return
         
-        self.log.info("Stopping StreamReceiver...")
         self.running = False
         self.shutdown_event.set()
         
@@ -446,8 +434,6 @@ class StreamReceiver:
         
         # Final garbage collection
         gc.collect()
-        
-        self.log.info("StreamReceiver stopped")
     
     def get_current_delay(self):
         """Get the current delay between data time and current time"""
@@ -475,8 +461,9 @@ class StreamReceiver:
     def debug_header_info(self, header):
         """Debug method to inspect header information"""
         self.log.info("=== Header Debug Information ===")
-        for key, value in header.items():
-            self.log.info(f"  {key}: {value} (type: {type(value)})")
+        if self.verbose:
+            for key, value in header.items():
+                self.log.info(f"  {key}: {value} (type: {type(value)})")
         
         current_time = time.time()
         
@@ -602,9 +589,9 @@ class StreamReceiver:
         return self.ring_buffer[indices[::-1]]
 
     def start_webserver(self):
-        """Start the Flask web server for live spectrum display"""
-        if not FLASK_AVAILABLE:
-            self.log.warning("Flask is not available, cannot start web server.")
+        """Start the Waitress web server for live spectrum display"""
+        if not FLASK_AVAILABLE or not WAITRESS_AVAILABLE:
+            self.log.warning("Web server dependencies not available, cannot start web server.")
             return
 
         try:
@@ -642,27 +629,27 @@ class StreamReceiver:
             web_port = 9527
             self.log.info(f"Web server starting on http://localhost:{web_port}")
             
-            # Start web server in a separate thread
+            # Start waitress server in a separate thread
             self.webserver_thread = threading.Thread(
-                target=lambda: self.app.run(host='localhost', port=web_port, debug=False, use_reloader=False),
+                target=lambda: serve(self.app, host='localhost', port=web_port, threads=4),
                 daemon=True
             )
             self.webserver_thread.start()
             
             # Wait a moment for server to start
             time.sleep(2)
-            self.log.info(f"Web server started successfully on port {web_port}")
             
         except Exception as e:
             self.log.error(f"Failed to start web server: {e}")
-            self.log.error("Web interface will not be available")
-
+            
     def stop_webserver(self):
-        """Stop the Flask web server"""
+        """Stop the Waitress web server"""
         if hasattr(self, 'webserver_thread') and self.webserver_thread.is_alive():
             self.log.info("Stopping web server...")
+            # Waitress doesn't have a built-in shutdown method, so we just wait for the thread to finish
             self.webserver_thread.join(timeout=5.0)
-            self.log.info("Web server stopped")
+            if self.webserver_thread.is_alive():
+                self.log.warning("Web server thread did not stop gracefully")
 
     def is_webserver_running(self):
         """Check if the web server is running and accessible"""
@@ -702,8 +689,8 @@ def main():
     parser = argparse.ArgumentParser(description="Stream Receiver for AvgStreamingOp")
     parser.add_argument('--addr', type=str, default='127.0.0.1',
                        help='Stream address (default: 127.0.0.1)')
-    parser.add_argument('--port', type=int, default=9798,
-                       help='Stream port (default: 9798)')
+    parser.add_argument('--port', type=int, default=30002,
+                       help='Stream port (default: 30002)')
     parser.add_argument('--buffer-length', type=int, default=1200,
                        help='Ring buffer length (default: 1200)')
     parser.add_argument('--gc-interval', type=int, default=100,
@@ -719,6 +706,9 @@ def main():
                        help='Start a web server on localhost:9898 to display live spectrum data')
     parser.add_argument('--streaming-interval', type=float, default=0.5,
                        help='Streaming interval in seconds per frame (default: 0.5)')
+    # verbose
+    parser.add_argument('--verbose', action='store_true',
+                       help='Verbose output')
     
     args = parser.parse_args()
     
@@ -738,7 +728,8 @@ def main():
         plot_interval=args.plot_interval,
         plot_dir=args.plot_dir,
         start_webshow=args.start_webshow,
-        streaming_interval=args.streaming_interval
+        streaming_interval=args.streaming_interval,
+        verbose=args.verbose
     )
     
     try:
@@ -747,17 +738,13 @@ def main():
         # Keep main thread alive
         while True:
             time.sleep(1)
-            # Print status every 10 seconds
-            if int(time.time()) % 10 == 0:
+            # Print status every 30 seconds (reduced from 10)
+            if int(time.time()) % 30 == 0:
                 status = receiver.get_buffer_status()
-                memory_info = receiver.get_memory_info()
-                print(f"Status: {status}")
-                print(f"Memory: RSS={memory_info['rss_mb']:.1f}MB, "
-                      f"Objects={memory_info['gc_objects']}, "
-                      f"Garbage={memory_info['gc_garbage']}")
+                print(f"Status: buffer={status['buffer_index']}, delay={status['current_delay']:.1f}s")
                 
-                # Show web server status if enabled
-                if receiver.start_webshow:
+                # Show web server status if enabled and verbose
+                if receiver.start_webshow and args.verbose:
                     web_status = receiver.get_webserver_status()
                     print(f"Web Server: {web_status['status']} - {web_status['url']}")
                 
