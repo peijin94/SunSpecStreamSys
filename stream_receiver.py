@@ -25,7 +25,7 @@ import matplotlib.dates as mdates
 
 # Web server imports
 try:
-    from flask import Flask, render_template, jsonify, Response
+    from flask import Flask, render_template, jsonify
     from flask_cors import CORS
     from waitress import serve
     import threading
@@ -111,6 +111,12 @@ class StreamReceiver:
         self.delay = 0.0  # Current delay in seconds
         self.delay_method = 'auto' # Default to 'auto'
         
+        # Type 3 detection (radio burst detection)
+        self.detection_interval = 10.0  # Detection interval in seconds
+        self.last_detection_time = 0
+        self.latest_detections = []  # Store latest detection results
+        self.detection_lock = threading.Lock()  # Thread safety for detections
+        
         # Setup logging
         self.setup_logging()
         
@@ -130,6 +136,56 @@ class StreamReceiver:
             handler.setFormatter(formatter)
             self.log.addHandler(handler)
             self.log.setLevel(logging.INFO)
+    
+    def run_type3_detection(self):
+        """Run Type 3 radio burst detection (dummy implementation)"""
+        current_time = time.time()
+        
+        # Check if enough time has passed since last detection
+        if current_time - self.last_detection_time < self.detection_interval:
+            return
+        
+        self.last_detection_time = current_time
+        
+        # Generate dummy detection results
+        # For now, create random bounding boxes
+        num_detections = np.random.randint(0, 8)  # 0-3 detections
+        detections = []
+        
+        for i in range(num_detections):
+            # Generate random bounding box coordinates
+            # x, y, width, height (normalized to 0-1)
+            x = np.random.uniform(0.1, 0.8)
+            y = np.random.uniform(0.1, 0.8)
+            width = np.random.uniform(0.02, 0.12)
+            height = np.random.uniform(0.25, 0.6)
+            
+            # Ensure box stays within bounds
+            if x + width > 1.0:
+                width = 1.0 - x
+            if y + height > 1.0:
+                height = 1.0 - y
+            
+            # Randomly assign class (0 = type3, 1 = type3b)
+            class_id = np.random.randint(0, 2)
+            class_name = 'type3' if class_id == 0 else 'type3b'
+            
+            detection = {
+                'id': i,
+                'class_id': class_id,
+                'class': class_name,
+                'confidence': np.random.uniform(0.6, 0.95),
+                'bbox': [x, y, width, height],  # [x, y, width, height]
+                'timestamp': current_time
+            }
+            detections.append(detection)
+        
+        # Update latest detections with thread safety
+        with self.detection_lock:
+            self.latest_detections = detections
+        
+        if self.verbose:
+            self.log.info(f"Type 3 detection: {len(detections)} bursts detected")
     
     def create_plot(self):
         """Create and save a plot of the buffer data"""
@@ -322,6 +378,9 @@ class StreamReceiver:
             
             if self.verbose:
                 self.log.debug(f"Processed frame: buffer_index={self.buffer_index}, delay={self.delay:.3f}s")
+            
+            # Run Type 3 detection
+            self.run_type3_detection()
             
             # Clean up temporary objects to reduce memory overhead
             del frame_data, pol_data, pol_data_reshaped, averaged_data
@@ -614,16 +673,23 @@ class StreamReceiver:
                 # Return empty list if no data
                 return jsonify([])
 
-            @self.app.route('/plot')
-            def get_plot():
-                # Create a temporary plot file
-                try:
-                    self.create_plot()
-                    with open(os.path.join(self.plot_dir, f"spectrum_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"), 'rb') as f:
-                        return Response(f.read(), mimetype='image/png')
-                except Exception as e:
-                    self.log.error(f"Error serving plot: {e}")
-                    return "Error serving plot", 500
+            @self.app.route('/type3detect')
+            def get_type3_detections():
+                """Get latest Type 3 radio burst detections"""
+                with self.detection_lock:
+                    detections = self.latest_detections.copy()
+                
+                # Add time anchor information
+                current_time = time.time()
+                response_data = {
+                    'detections': detections,
+                    'timestamp': current_time,
+                    'time_anchor': current_time,
+                    'count': len(detections),
+                    'last_detection_time': self.last_detection_time
+                }
+                
+                return jsonify(response_data)
 
             # Use fixed port 9527 for web server
             web_port = 9527

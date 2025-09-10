@@ -5,3 +5,4 @@ psutil>=5.8.0
 astropy>=4.0.0
 flask>=2.0.0
 flask-cors>=3.0.0
+waitress>=2.0.0

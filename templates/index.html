@@ -121,6 +121,8 @@
             <div>Update Rate: <span id="updateRateDisplay">4.0 fps</span></div>
             <div>Data Range: 10^4 to 10^9</div>
             <div>Last Update: <span id="lastUpdate">Never</span></div>
+            <div>Detections: <span id="detectionCount">0</span></div>
+            <div>Detection History: <span id="detectionHistoryCount">0</span></div>
         </div>
     </div>
 
@@ -151,6 +153,7 @@
             const $ = id => document.getElementById(id);
             const statusEl = $('status'), frameCountEl = $('frameCount');
             const updateRateDisplayEl = $('updateRateDisplay'), lastUpdateEl = $('lastUpdate');
+            const detectionCountEl = $('detectionCount'), detectionHistoryCountEl = $('detectionHistoryCount');
 
             // Fixed update rate - no UI controls needed
             function syncLabels(){
@@ -288,14 +291,17 @@
                 // This should be from 0 to writeX-1 (right side)
                 if (writeX > 0) {
                     const rightWidth = writeX * scaleX;
-                    const rightX = 200 + leftPortion * scaleX;  // Position with 40px padding
+                    const rightX = 200 + leftPortion * scaleX;  // Position with 200px padding
                     ctx.drawImage(tex, 0, 0, writeX, bins, 
-                                rightX, 50, rightWidth, plotHeight);  // Position with 40px padding
+                                rightX, 50, rightWidth, plotHeight);  // Position with 200px padding
                 }
                 
                 // Add frequency and time scale labels
                 drawFrequencyScale(W, H);
                 drawTimeScale(W, H);
+                
+                // Draw detection bounding boxes
+                drawDetections(W, H);
             }
             
             // Draw frequency scale on the left (vertical)
@@ -314,11 +320,11 @@
                     ctx.fillText(freq + 'MHz', 145, y + 4);  // Position text outside plot
                     
                     // Draw horizontal line extending across the plot
-                    ctx.strokeStyle = '#333';
-                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = '#222';
+                    ctx.lineWidth = 1.5;
                     ctx.beginPath();
                     ctx.moveTo(200, y);  // Start from plot edge (40px left padding)
-                    ctx.lineTo(canvasWidth - 50, y);  // End at plot edge (40px right padding)
+                    ctx.lineTo(canvasWidth - 40, y);  // End at plot edge (40px right padding)
                     ctx.stroke();
                 });
                 
@@ -341,11 +347,11 @@
                     ctx.fillText(label, x, canvasHeight - 25);  // Position text below plot
                     
                     // Draw vertical line extending up the plot
-                    ctx.strokeStyle = '#333';
-                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = '#222';
+                    ctx.lineWidth = 1.5;
                     ctx.beginPath();
-                    ctx.moveTo(x, 70);  // Start from plot edge (40px top padding)
-                    ctx.lineTo(x, canvasHeight - 30);  // End at plot edge (40px bottom padding)
+                    ctx.moveTo(x, 50);  // Start from plot edge (40px top padding)
+                    ctx.lineTo(x, canvasHeight - 70);  // End at plot edge (40px bottom padding)
                     ctx.stroke();
                 });
                 
@@ -379,20 +385,166 @@
                 }
             }
 
-            // FPS counter
+            // Detection fetching and tracking
+            let latestDetections = [];
+            let detectionHistory = []; // Store detections with timestamps for shifting
+            let detectionTimeWindow = 300; // Keep detections for 300 seconds (5 minutes)
+            
+            async function fetchDetections(){
+                try {
+                    const response = await fetch('/live/type3detect');
+                    if (response.ok) {
+                        const data = await response.json();
+                        const newDetections = data.detections || [];
+                        
+                        if (newDetections.length > 0) {
+                            console.log(`Type 3 detections: ${newDetections.length} bursts found`);
+                            
+                            // Clear previous round of detections when new ones arrive
+                            detectionHistory = [];
+                            
+                            // Add timestamp to each detection and add to history
+                            const currentTime = Date.now() / 1000; // Current time in seconds
+                            newDetections.forEach(detection => {
+                                detection.detectionTime = currentTime;
+                                detectionHistory.push(detection);
+                            });
+                        }
+                        
+                        latestDetections = newDetections;
+                        
+                        // Update status displays
+                        detectionCountEl.textContent = latestDetections.length;
+                        detectionHistoryCountEl.textContent = detectionHistory.length;
+                    } else {
+                        console.error(`Detection fetch failed: HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    console.error('Error fetching detections:', error);
+                }
+            }
+
+            // Draw detection bounding boxes
+            function drawDetections(canvasWidth, canvasHeight) {
+                if (detectionHistory.length === 0) return;
+                
+                ctx.save();
+                
+                // Calculate plot area (same as waterfall)
+                const plotWidth = canvasWidth - 240;   // Account for left/right padding
+                const plotHeight = canvasHeight - 120; // Account for top/bottom padding
+                const plotX = 200;  // Left edge of plot
+                const plotY = 50;   // Top edge of plot
+                
+                // Calculate time scale (same as waterfall time axis)
+                // Waterfall shows 300 seconds (5 minutes) of data
+                const timeWindow = 300; // seconds
+                const currentTime = Date.now() / 1000;
+                
+                detectionHistory.forEach((detection, index) => {
+                    const [x, y, width, height] = detection.bbox;
+                    const confidence = detection.confidence;
+                    const classId = detection.class_id;
+                    const className = detection.class;
+                    const detectionTime = detection.detectionTime;
+                    
+                    // Calculate time offset from current time
+                    const timeOffset = currentTime - detectionTime;
+                    
+                    // Skip if detection is too old (outside time window)
+                    if (timeOffset > timeWindow) return;
+                    
+                    // Calculate X position based on time offset
+                    // Newest detections (timeOffset = 0) are at the right edge
+                    // Older detections shift left
+                    const timeRatio = timeOffset / timeWindow; // 0 = newest, 1 = oldest
+                    const timeX = - ( timeRatio) * plotWidth; //adjust the timeX to the left
+                    
+                    // Convert normalized coordinates to canvas coordinates
+                    const canvasX = timeX + x * plotWidth;
+                    const canvasY = plotY + y * plotHeight;
+                    const canvasWidth = width * plotWidth;
+                    const canvasHeight = height * plotHeight;
+                    
+                    // Skip if detection is outside the visible area
+                    if (canvasX < plotX || canvasX > plotX + plotWidth) return;
+                    
+                    // Set color based on class
+                    let strokeColor;
+                    if (classId === 0) {
+                        strokeColor = '#ff0000'; // Red for type3 (class 0)
+                    } else if (classId === 1) {
+                        strokeColor = '#ffffff'; // White for type3b (class 1)
+                    } else {
+                        strokeColor = '#ffff00'; // Yellow for unknown classes
+                    }
+                    
+                    // Draw bounding box
+                    ctx.strokeStyle = strokeColor;
+                    ctx.lineWidth = 3;
+                    //ctx.setLineDash([5, 5]); // Dashed line
+                    ctx.strokeRect(canvasX, canvasY, canvasWidth, canvasHeight);
+                    
+                    // Draw confidence and class text
+                    ctx.fillStyle = strokeColor;
+                    ctx.font = '25px monospace';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(`${className} ${(confidence * 100).toFixed(1)}%`, canvasX + 2, canvasY - 5);
+                    
+                    // Draw detection ID
+                    //ctx.fillText(`ID:${detection.id}`, canvasX + 2, canvasY + canvasHeight + 15);
+                });
+                
+                ctx.restore();
+            }
+
+            // FPS counter and detection timing
             let lastT = performance.now(), acc=0, frames=0, lastFpsT=lastT;
+            let detectionAcc = 0;
+            let cleanupAcc = 0;
+
+            // Clean up old detections periodically (backup cleanup)
+            function cleanupOldDetections() {
+                const currentTime = Date.now() / 1000;
+                const cutoffTime = currentTime - detectionTimeWindow;
+                const beforeCount = detectionHistory.length;
+                detectionHistory = detectionHistory.filter(det => det.detectionTime > cutoffTime);
+                const afterCount = detectionHistory.length;
+                
+                if (beforeCount !== afterCount) {
+                    console.log(`Backup cleanup: removed ${beforeCount - afterCount} old detections. ${afterCount} remaining.`);
+                }
+                
+                // Update status display
+                detectionHistoryCountEl.textContent = detectionHistory.length;
+            }
 
             function loop(now){
                 const dt = Math.min(0.1, (now - lastT)/1000);
                 lastT = now; 
                 acc += dt * updateRate;
+                detectionAcc += dt * 0.1; // 8 second interval (1/8 = 0.125)
+                cleanupAcc += dt * 0.1; // Cleanup every 10 seconds
 
                 if (running && acc >= 1){ 
                     fetchData(); 
+                    blitToView();
                     acc -= 1; 
                 }
 
-                blitToView();
+                // Fetch detections every 8 seconds
+                if (detectionAcc >= 1) {
+                    fetchDetections();
+                    detectionAcc -= 1;
+                }
+
+                // Clean up old detections every 10 seconds
+                if (cleanupAcc >= 1) {
+                    cleanupOldDetections();
+                    cleanupAcc -= 1;
+                }
+
+                
 
                 frames++;
                 if (now - lastFpsT > 500){
@@ -410,6 +562,9 @@
             
             // Start data fetching immediately
             fetchData();
+            
+            // Start detection fetching immediately
+            fetchDetections();
             
             // Start render loop
             requestAnimationFrame(loop);
