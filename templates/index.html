@@ -461,11 +461,14 @@
                     const timeX = - ( timeRatio) * plotWidth; //adjust the timeX to the left
                     
                     // Convert normalized coordinates to canvas coordinates
-                    const canvasX = timeX + x * plotWidth;
+                    const canvasX = plotX + timeX + x * plotWidth;
                     const canvasY = plotY + y * plotHeight;
                     const canvasWidth = width * plotWidth;
                     const canvasHeight = height * plotHeight;
                     
+                    console.log(timeOffset, timeWindow);
+                    console.log(x, y, width, height);
+                    console.log(canvasX, canvasY, canvasWidth, canvasHeight);
                     // Skip if detection is outside the visible area
                     if (canvasX < plotX || canvasX > plotX + plotWidth) return;
                     

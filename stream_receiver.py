@@ -12,6 +12,8 @@ from collections import deque
 from datetime import datetime, timezone, timedelta
 from astropy.time import Time
 
+from util import paint_arr_to_jpg
+
 # Configure matplotlib for headless server (no display required)
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for headless servers
@@ -67,8 +69,8 @@ class StreamReceiver:
     Connects to ZMQ stream, processes data, and maintains a ring buffer.
     """
     
-    def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=1200, gc_interval=100, 
-                 plot_interval=10, plot_dir='/fast/peijinz/streaming/figs/', start_webshow=False, streaming_interval=0.25, verbose=False):
+    def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=600, gc_interval=100, 
+                 plot_interval=10, plot_dir='./figs/', start_webshow=False, streaming_interval=0.5, verbose=False):
         self.stream_addr = stream_addr
         self.stream_port = stream_port
         self.buffer_length = buffer_length
@@ -89,7 +91,7 @@ class StreamReceiver:
         self.socket.connect(f"tcp://{self.stream_addr}:{self.stream_port}")
         self.socket.setsockopt(zmq.SUBSCRIBE, b"")  # Subscribe to all messages
         
-        # Ring buffer: 1200 x 768 (N_freq/4)
+        # Ring buffer: 600 x 768 (N_freq/4)
         self.ring_buffer = np.zeros((buffer_length, 768), dtype=np.float32)
         self.buffer_index = 0
         
@@ -112,7 +114,7 @@ class StreamReceiver:
         self.delay_method = 'auto' # Default to 'auto'
         
         # Type 3 detection (radio burst detection)
-        self.detection_interval = 10.0  # Detection interval in seconds
+        self.detection_interval = 5.0  # Detection interval in seconds
         self.last_detection_time = 0
         self.latest_detections = []  # Store latest detection results
         self.detection_lock = threading.Lock()  # Thread safety for detections
@@ -137,7 +139,137 @@ class StreamReceiver:
             self.log.addHandler(handler)
             self.log.setLevel(logging.INFO)
     
+
+    def save_latest_data_to_jpg(self, norm_factor=1e4*24, out_size=(640,640)):
+        """
+        Save the latest data to a jpg image.
+        Parameters
+        ----------
+        norm_factor : float, optional
+            Normalization factor for the data. Default is 1e4*24.
+        out_size: tuple, optional
+            Output size for the image. Default is (320,320).
+        Returns
+        -------
+        str: Path to the saved image
+        """
+
+        latest_data = self.get_latest_data(n_frames=self.buffer_length)
+        latest_data = np.flip(latest_data, axis=1)
+
+        # use scikit-image to resize the image
+        from skimage.transform import resize
+        
+        data_out = resize(latest_data, out_size, anti_aliasing=True)
+
+        paint_arr_to_jpg(data_out/norm_factor, filename=f'{self.plot_dir}/latest_data.jpg', vmax=300, vmin=0.5, scaling='log')
+        #self.log.info(f"Latest data saved to {self.plot_dir}/latest_data.jpg")
+
+        return f'{self.plot_dir}/latest_data.jpg'
+
+
+    def save_latest_data_to_npz(self, norm_factor=1e4*24):
+        """Save the latest data to a npz file"""
+        latest_data = self.get_latest_data(n_frames=self.buffer_length)
+        np.savez(f'{self.plot_dir}/latest_data.npz', data=latest_data/norm_factor)
+        self.log.info(f"Latest data saved to {self.plot_dir}/latest_data.npz")
+        return f'{self.plot_dir}/latest_data.npz'
+
+
     def run_type3_detection(self):
+        """Run Type 3 radio burst detection using YOLO v8s model"""
+        current_time = time.time()
+        
+        # Check if enough time has passed since last detection
+        if current_time - self.last_detection_time < self.detection_interval:
+            return
+        
+        
+        try:
+            # Import YOLO here to avoid import errors if not installed
+            from ultralytics import YOLO
+            
+
+            
+            # Load YOLO model
+            model_path = 'model/best.pt'
+            if not os.path.exists(model_path):
+                self.log.error(f"YOLO model not found at {model_path}")
+                return
+            
+            model = YOLO(model_path)
+            
+            # Save latest data as image for detection
+            image_path = self.save_latest_data_to_jpg()
+            
+            # Check if image file exists
+            if not os.path.exists(image_path):
+                self.log.error(f"Latest data image not found at {image_path}")
+                return
+            
+            # Run YOLO prediction on the image
+            results = model.predict(image_path, conf=0.3, iou=0.6, verbose=False)
+            
+            # Process detection results
+            detections = []
+            if results and len(results) > 0:
+
+                self.last_detection_time = current_time
+                result = results[0]  # Get first (and only) result
+                
+                if result.boxes is not None and len(result.boxes) > 0:
+                    boxes = result.boxes
+                    
+                    for i in range(len(boxes)):
+                        # Get bounding box coordinates (xyxy format)
+                        box = boxes.xyxy[i].cpu().numpy()
+                        x1, y1, x2, y2 = box
+                        
+                        # Convert to normalized coordinates (x, y, width, height)
+                        img_height, img_width = 640, 640  # Image size from save_latest_data_to_jpg
+                        x = float(x1 / img_width)
+                        y = float(y1 / img_height)
+                        width = float((x2 - x1) / img_width)
+                        height = float((y2 - y1) / img_height)
+                        
+                        # Get class and confidence
+                        class_id = int(boxes.cls[i].cpu().numpy())
+                        confidence = float(boxes.conf[i].cpu().numpy())
+                        
+                        # Map class ID to class name (assuming 0=type3, 1=type3b)
+                        class_name = 'type3' if class_id == 0 else 'type3b'
+                        
+                        detection = {
+                            'id': i,
+                            'class_id': class_id,
+                            'class': class_name,
+                            'confidence': confidence,
+                            'bbox': [x, y, width, height],  # [x, y, width, height] normalized (all Python floats)
+                            'timestamp': current_time
+                        }
+                        detections.append(detection)
+            else:
+                self.log.info(f"No detections found in {image_path}")
+            
+            # Update latest detections with thread safety
+            with self.detection_lock:
+                self.latest_detections = detections
+            
+            if self.verbose and len(detections) > 0:
+                self.log.info(f"Type 3 detection: {len(detections)} bursts detected")
+                for det in detections:
+                    self.log.info(f"  - {det['class']}: {det['confidence']:.3f} at {det['bbox']}")
+            
+        except ImportError as e:
+            self.log.error(f"YOLO dependencies not available: {e}")
+            self.log.info("Please install ultralytics: pip install ultralytics")
+        except Exception as e:
+            self.log.error(f"Error in Type 3 detection: {str(e)}")
+            import traceback
+            self.log.error(f"Traceback: {traceback.format_exc()}")
+
+
+    def run_type3_detection_dummy(self):
         """Run Type 3 radio burst detection (dummy implementation)"""
         current_time = time.time()
         
@@ -146,7 +278,10 @@ class StreamReceiver:
             return
         
         self.last_detection_time = current_time
-        
+
+        latest_data_jpg = self.save_latest_data_to_jpg()
+        #latest_data_npz = self.save_latest_data_to_npz()
+
         # Generate dummy detection results
         # For now, create random bounding boxes
         num_detections = np.random.randint(0, 8)  # 0-3 detections
@@ -688,7 +823,7 @@ class StreamReceiver:
                     'count': len(detections),
                     'last_detection_time': self.last_detection_time
                 }
-                
+                print(response_data)
                 return jsonify(response_data)
 
             # Use fixed port 9527 for web server
@@ -757,14 +892,14 @@ def main():
                        help='Stream address (default: 127.0.0.1)')
     parser.add_argument('--port', type=int, default=30002,
                        help='Stream port (default: 30002)')
-    parser.add_argument('--buffer-length', type=int, default=1200,
-                       help='Ring buffer length (default: 1200)')
+    parser.add_argument('--buffer-length', type=int, default=300,
+                       help='Ring buffer length (default: 600)')
     parser.add_argument('--gc-interval', type=int, default=100,
                        help='Garbage collection interval in frames (default: 100)')
     parser.add_argument('--plot-interval', type=int, default=0, # by default, no plotting 
                        help='Plotting interval in seconds (0 = disable plotting, default: 10)')
-    parser.add_argument('--plot-dir', type=str, default='/fast/peijinz/streaming/figs/',
-                       help='Directory to save plots (default: /fast/peijinz/streaming/figs/)')
+    parser.add_argument('--plot-dir', type=str, default='./figs/',
+                       help='Directory to save plots (default: ./figs/)')
     parser.add_argument('--log-level', type=str, default='INFO',
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                        help='Log level (default: INFO)')
