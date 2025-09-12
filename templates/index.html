@@ -406,7 +406,8 @@
                             // Add timestamp to each detection and add to history
                             const currentTime = Date.now() / 1000; // Current time in seconds
                             newDetections.forEach(detection => {
-                                detection.detectionTime = currentTime;
+                                //detection.detectionTime = currentTime;
+                                detection.detectionTime = data.last_detection_time;
                                 detectionHistory.push(detection);
                             });
                         }
