@@ -70,21 +70,15 @@ class StreamReceiver:
     """
     
     def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=600, gc_interval=100, 
-                 plot_interval=10, plot_dir='./figs/', start_webshow=False, streaming_interval=0.5, verbose=False):
+                 start_webshow=False, streaming_interval=0.5, verbose=False, plot_dir='./figs/', save_dir='./stream_spec_npz/', save_all_to_file=False):
         self.stream_addr = stream_addr
         self.stream_port = stream_port
         self.buffer_length = buffer_length
         self.gc_interval = gc_interval  # Garbage collection interval
-        self.plot_interval = plot_interval  # Plotting interval in seconds (0 = skip plotting)
-        self.plot_dir = plot_dir  # Directory to save plots
         self.start_webshow = start_webshow # Flag to start web server
         self.streaming_interval = streaming_interval  # Streaming interval in seconds per frame
         self.verbose = verbose
 
-        # Create plot directory if it doesn't exist and plotting is enabled
-        if self.plot_interval > 0:
-            os.makedirs(self.plot_dir, exist_ok=True)
-        
         # ZMQ setup
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.SUB)
@@ -93,21 +87,24 @@ class StreamReceiver:
         
         # Ring buffer: 600 x 768 (N_freq/4)
         self.ring_buffer = np.zeros((self.buffer_length, 768), dtype=np.float32)
+        self.ring_buffer_v = np.zeros((self.buffer_length, 768), dtype=np.float32)
         self.buffer_index = 0
+        self.ring_arr_mjd = np.zeros((self.buffer_length, 1), dtype=np.float64)
+        
+        self.save_all_to_file = save_all_to_file
+        self.save_dir = save_dir
+        os.makedirs(self.save_dir, exist_ok=True)
         
         # Data processing parameters
         self.N_freq = 3072
         self.N_pol = 4
-        self.pol_index = 0  # Use pol=0
+        
+        self.plot_dir = plot_dir
+        os.makedirs(self.plot_dir, exist_ok=True)
         
         # Control flags
         self.running = False
         self.shutdown_event = threading.Event()
-        
-        # Plotting control
-        self.plot_running = False
-        self.plot_shutdown_event = threading.Event()
-        self.last_plot_time = 0
         
         # Delay tracking
         self.delay = 0.0  # Current delay in seconds
@@ -123,8 +120,6 @@ class StreamReceiver:
         self.setup_logging()
         
         self.log.info(f"StreamReceiver initialized: {stream_addr}:{stream_port}")
-        if self.plot_interval > 0:
-            self.log.info(f"Plotting enabled: every {plot_interval}s")
         if self.start_webshow:
             self.log.info("Web server enabled")
     
@@ -154,12 +149,11 @@ class StreamReceiver:
         str: Path to the saved image
         """
 
-        latest_data = self.get_latest_data(n_frames=self.buffer_length)
+        latest_data = self.get_latest_data(n_frames=self.buffer_length)[0]
         latest_data = np.flip(latest_data, axis=1)
 
         # use scikit-image to resize the image
         from skimage.transform import resize
-        
         data_out = resize(latest_data, out_size, anti_aliasing=True)
 
         paint_arr_to_jpg(data_out/norm_factor, filename=f'{self.plot_dir}/latest_data.jpg', vmax=300, vmin=0.5, scaling='log')
@@ -168,12 +162,23 @@ class StreamReceiver:
         return f'{self.plot_dir}/latest_data.jpg'
 
 
-    def save_latest_data_to_npz(self, norm_factor=1e4*24):
+    def save_latest_data_to_npz(self, norm_factor=1e4*24, save_dir='./figs/', filename='latest_data.npz'): # norm factor to convert to sfu
         """Save the latest data to a npz file"""
-        latest_data = self.get_latest_data(n_frames=self.buffer_length)
-        np.savez(f'{self.plot_dir}/latest_data.npz', data=latest_data/norm_factor)
-        self.log.info(f"Latest data saved to {self.plot_dir}/latest_data.npz")
-        return f'{self.plot_dir}/latest_data.npz'
+        latest_data, mjd_data = self.get_latest_data(n_frames=self.buffer_length, pol='I')
+        latest_data_v = self.get_latest_data(n_frames=self.buffer_length, pol='V')[0]
+
+        # create 3-dim array with shape (*latest_data.shape, 2)
+        data_out = np.zeros((*latest_data.shape, 2), dtype=np.float32)
+        data_out[..., 0] = latest_data
+        data_out[..., 1] = latest_data_v
+
+        freq_lower = 196*(600/8192)
+        freq_upper = 196*((600+3072-1)/8192)
+        freq_array = np.linspace(freq_lower, freq_upper, data_out.shape[1])
+
+        np.savez(f'{save_dir}/{filename}', data=data_out/norm_factor, mjd=self.ring_arr_mjd, freq=freq_array)
+        self.log.info(f"Latest data saved to {save_dir}/{filename}")
+        return f'{save_dir}/{filename}'
 
 
     def run_type3_detection(self):
@@ -318,115 +323,7 @@ class StreamReceiver:
         
         if self.verbose:
             self.log.info(f"Type 3 detection: {len(detections)} bursts detected")
-    
-    def create_plot(self):
-        """Create and save a plot of the buffer data"""
-        # Skip plotting if disabled
-        if self.plot_interval <= 0:
-            return
-            
-        try:
-            current_time = time.time()
-            
-            # Check if enough time has passed since last plot
-            if current_time - self.last_plot_time < self.plot_interval:
-                return
-            
-            self.last_plot_time = current_time
-            
-            # Create figure with subplots
-            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-            
-            # Get current buffer data
-            if self.buffer_index > 0:
-                # Get the most recent data (up to buffer_length frames)
-                n_frames = min(self.buffer_index, self.buffer_length)
-                recent_data = self.get_latest_data(n_frames=n_frames)
-                
-                if recent_data.size > 0:
-                    # Plot 1: Latest spectrum (log scale)
-                    latest_spectrum = recent_data[-1, :]  # Most recent frame
-                    freq_channels = np.arange(1536)
-                    
-                    # Use log scale for power spectrum
-                    ax1.semilogy(freq_channels, latest_spectrum, 'b-', linewidth=0.8)
-                    ax1.set_title(f'Latest Spectrum - {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")} UTC [lag: {self.delay:.1f}s]')
-                    ax1.set_xlabel('Frequency Channel')
-                    ax1.set_ylabel('Power (log scale)')
-                    ax1.grid(True, alpha=0.3)
-                    
-                    # Set reasonable y-axis limits for log scale
-                    valid_data = latest_spectrum[latest_spectrum > 0]
-                    if len(valid_data) > 0:
-                        y_min = np.percentile(valid_data, 1)  # 1st percentile
-                        y_max = np.percentile(valid_data, 99)  # 99th percentile
-                        ax1.set_ylim(y_min, y_max)
-                    
-                    # Plot 2: Waterfall plot (time vs frequency, log color scale)
-                    if recent_data.shape[0] > 1:
-                        # Create time axis (time in seconds relative to now)
-                        time_axis = np.linspace(-n_frames * 0.5, 0, n_frames)
-                        
-                        # Create frequency axis
-                        freq_axis = np.arange(1536)
-                        
-                        # Create waterfall plot with time as x-axis and frequency as y-axis
-                        im = ax2.pcolormesh(time_axis, freq_axis, recent_data.T, 
-                                           shading='auto', cmap='viridis', norm=matplotlib.colors.LogNorm())
-                        
-                        ax2.set_title(f'Waterfall Plot - Last {n_frames} frames ({n_frames * 0.5:.1f}s) [lag: {self.delay:.1f}s]')
-                        ax2.set_xlabel('Time (seconds ago)')
-                        ax2.set_ylabel('Frequency Channel')
-                        
-                        # Add colorbar with log scale
-                        cbar = plt.colorbar(im, ax=ax2, aspect=30)
-                        cbar.set_label('Power (log scale)')
-                        
-                        # Invert x-axis so most recent is at right
-                        ax2.invert_xaxis()
-                    else:
-                        ax2.text(0.5, 0.5, 'Insufficient data for waterfall plot', 
-                                ha='center', va='center', transform=ax2.transAxes)
-                        ax2.set_title('Waterfall Plot')
-            else:
-                # No data yet
-                ax1.text(0.5, 0.5, 'No data received yet', 
-                        ha='center', va='center', transform=ax1.transAxes)
-                ax1.set_title('Latest Spectrum')
-                ax2.text(0.5, 0.5, 'No data received yet', 
-                        ha='center', va='center', transform=ax2.transAxes)
-                ax2.set_title('Waterfall Plot')
-            
-            # Adjust layout and save
-            plt.tight_layout()
-            
-            # Generate filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(self.plot_dir, f"spectrum_{timestamp}.png")
-            
-            # Save plot
-            plt.savefig(filename, dpi=150, bbox_inches='tight')
-            plt.close(fig)
-            
-            if self.verbose:
-                self.log.info(f"Plot saved: {filename}")
-            
-        except Exception as e:
-            self.log.error(f"Error creating plot: {str(e)}")
-    
-    def plot_loop(self):
-        """Main plotting loop that runs in a separate thread"""
-        while not self.plot_shutdown_event.is_set():
-            try:
-                # Create plot if enough time has passed
-                self.create_plot()
-                
-                # Sleep for a short interval
-                time.sleep(1)
-                
-            except Exception as e:
-                self.log.error(f"Error in plotting loop: {str(e)}")
-                time.sleep(1)
+ 
     
     def process_frame(self, data, header):
         """
@@ -452,34 +349,40 @@ class StreamReceiver:
                 self.log.warning(f"Unexpected data size: {frame_data.size}, expected: {expected_size}")
                 return
             
-            # Reshape to (1, 3072, 4)
+            # Reshape to (1, 3072, 4)  XX,YY, XY_real, XY_imag
             frame_data = frame_data.reshape(1, self.N_freq, self.N_pol)
             
             # Extract pol=0 and average down to N_freq/4 = 768
-            pol_data = frame_data[0, :, self.pol_index]  # Shape: (3072,)
-            
+            pol_data   = (frame_data[0, :, 0] + frame_data[0, :, 1]) / 2  # Shape: (3072,)
+            pol_data_v = (frame_data[0, :, 3])  # Shape: (3072,)
+
             # Average down by factor of 4
             # Reshape to (768, 4) and take mean along axis 1
             pol_data_reshaped = pol_data.reshape(768, 4)
+            pol_data_v_reshaped = pol_data_v.reshape(768, 4)
+
             averaged_data = np.mean(pol_data_reshaped, axis=1)  # Shape: (768,)
-            
+            averaged_data_v = np.mean(pol_data_v_reshaped, axis=1)  # Shape: (768,)
+
             # Update ring buffer
             self.ring_buffer[self.buffer_index, :] = averaged_data
-            
+            self.ring_buffer_v[self.buffer_index, :] = averaged_data_v
+
             # Update buffer index (circular)
             self.buffer_index = (self.buffer_index + 1) % self.buffer_length
+
+            # update ring_arr_mjd
+            string_time = header["last_block_time"]
+            self.ring_arr_mjd[self.buffer_index, 0] = Time(string_time, format='iso', scale='utc').mjd
             
             # Calculate delay between data timestamp and current time
             if self.delay_method == 'manual':
                 # Use manually set delay, don't recalculate
                 pass
-            elif self.delay_method == 'buffer':
-                # Always use buffer-based calculation
-                self.delay = (self.buffer_length - self.buffer_index) * self.streaming_interval
-                self.log.debug(f"Buffer-based delay: {self.delay:.3f}s")
             elif self.delay_method == 'auto':
                 current_time_utc = Time.now().unix
                 
+                #print("last_block_time", header["last_block_time"], "timestamp", header["timestamp"])
                 # Use header["timestamp"] for delay calculation (new format from dr_beam.py)
                 if "timestamp" in header:
                     timestamp_val = header["timestamp"]
@@ -511,8 +414,19 @@ class StreamReceiver:
             if self.verbose:
                 self.log.debug(f"Processed frame: buffer_index={self.buffer_index}, delay={self.delay:.3f}s")
             
-            # Run Type 3 detection
-            self.run_type3_detection()
+            # Run Type 3 detection every 5 frames
+            if (self.buffer_index + 3) % 5 == 0:
+                self.run_type3_detection()
+
+            # save all when buffer_index everytime when length-1
+            if self.save_all_to_file and self.buffer_index == self.buffer_length - 1:
+                
+                time_now_iso_str = Time.now().iso[:19].replace(' ', '_').replace(':', '_')
+                date_now_str = Time.now().iso[:10].replace(' ', '_').replace(':', '_')
+                dir_data = os.path.join(self.save_dir, date_now_str)
+                #mkdir
+                os.makedirs(dir_data, exist_ok=True)
+                self.save_latest_data_to_npz(save_dir=dir_data, filename=f'{time_now_iso_str}.npz')
             
             # Clean up temporary objects to reduce memory overhead
             del frame_data, pol_data, pol_data_reshaped, averaged_data
@@ -537,7 +451,6 @@ class StreamReceiver:
                     
                     # Parse header
                     header = json.loads(header_data.decode())
-                    
                     # Process data based on topic
                     if topic == b"data":
                         # This is the actual data
@@ -549,7 +462,6 @@ class StreamReceiver:
                             gc.collect()
                             gc_counter = 0
 
-                        print(f"idx: {self.buffer_index}", f"time: {time.time()}")
                     else:
                         self.log.warning(f"Unknown topic: {topic}")
 
@@ -580,13 +492,7 @@ class StreamReceiver:
         self.receive_thread = threading.Thread(target=self.receive_loop, daemon=True)
         self.receive_thread.start()
         
-        # Start plotting thread only if plotting is enabled
-        if self.plot_interval > 0:
-            self.plot_running = True
-            self.plot_shutdown_event.clear()
-            self.plot_thread = threading.Thread(target=self.plot_loop, daemon=True)
-            self.plot_thread.start()
-        
+
         # Start web server only if enabled
         if self.start_webshow:
             self.start_webserver()
@@ -602,14 +508,6 @@ class StreamReceiver:
         self.running = False
         self.shutdown_event.set()
         
-        # Stop plotting only if it was started
-        if self.plot_running:
-            self.plot_running = False
-            self.plot_shutdown_event.set()
-            
-            # Wait for plotting thread to finish
-            if hasattr(self, 'plot_thread'):
-                self.plot_thread.join(timeout=5.0)
         
         # Stop web server
         if self.start_webshow:
@@ -700,8 +598,6 @@ class StreamReceiver:
             'buffer_index': self.buffer_index,
             'buffer_shape': self.ring_buffer.shape,
             'is_running': self.running,
-            'plot_running': self.plot_running,
-            'last_plot_time': self.last_plot_time,
             'current_delay': self.delay,
             'clock_offset': None, # Removed clock_offset
             'last_sync_time': None, # Removed last_sync_time
@@ -715,47 +611,8 @@ class StreamReceiver:
         self.log.info(f"Manual garbage collection: collected {collected} objects")
         return collected
     
-    def get_memory_info(self):
-        """Get memory usage information"""
-        import psutil
-        process = psutil.Process()
-        memory_info = process.memory_info()
-        
-        return {
-            'rss_mb': memory_info.rss / 1024 / 1024,  # Resident Set Size in MB
-            'vms_mb': memory_info.vms / 1024 / 1024,  # Virtual Memory Size in MB
-            'gc_objects': len(gc.get_objects()),
-            'gc_garbage': len(gc.garbage)
-        }
     
-    def optimize_memory(self):
-        """Optimize memory usage by clearing old data and running GC"""
-        # Clear old data from ring buffer if memory usage is high
-        memory_info = self.get_memory_info()
-        
-        if memory_info['rss_mb'] > 100:  # If using more than 100MB
-            # Clear half of the ring buffer
-            clear_start = (self.buffer_index + self.buffer_length // 2) % self.buffer_length
-            clear_end = self.buffer_index
-            
-            if clear_start < clear_end:
-                self.ring_buffer[clear_start:clear_end, :] = 0
-            else:
-                self.ring_buffer[clear_start:, :] = 0
-                self.ring_buffer[:clear_end, :] = 0
-            
-            self.log.info(f"Cleared ring buffer to reduce memory usage (RSS: {memory_info['rss_mb']:.1f}MB)")
-        
-        # Force garbage collection
-        collected = self.force_garbage_collection()
-        
-        return {
-            'memory_before': memory_info,
-            'memory_after': self.get_memory_info(),
-            'objects_collected': collected
-        }
-    
-    def get_latest_data(self, n_frames=1):
+    def get_latest_data(self, n_frames=1, pol='I'):
         """
         Get the latest n_frames from the ring buffer
         
@@ -777,9 +634,14 @@ class StreamReceiver:
         for i in range(n_frames):
             idx = (self.buffer_index - 1 - i) % self.buffer_length
             indices.append(idx)
-        
-        # Return data in chronological order (oldest first)
-        return self.ring_buffer[indices[::-1]]
+
+        if pol == 'I':
+            return self.ring_buffer[indices[::-1]], self.ring_arr_mjd[indices[::-1]]
+        elif pol == 'V':
+            return self.ring_buffer_v[indices[::-1]], self.ring_arr_mjd[indices[::-1]]
+        else:
+            raise ValueError(f"Invalid polarization: {pol}")  
+            return None, None
 
     def start_webserver(self):
         """Start the Waitress web server for live spectrum display"""
@@ -799,7 +661,7 @@ class StreamReceiver:
             def get_data():
                 # Get the latest data from the ring buffer
                 if self.buffer_index > 0:
-                    latest_data = self.get_latest_data(n_frames=1)
+                    latest_data = self.get_latest_data(n_frames=1)[0]
                     if latest_data.size > 0:
                         # Return the most recent frame as a list
                         data_json = latest_data[0].tolist()
@@ -826,11 +688,11 @@ class StreamReceiver:
                 return jsonify(response_data)
 
             @self.app.route('/refresh')
-            def refresh_data():
+            def refresh_data(n_frames=600):
                 """Get the entire buffer array for refresh functionality"""
                 if self.buffer_index > 0:
                     # Get all available data from the ring buffer
-                    latest_data = self.get_latest_data(n_frames=self.buffer_length)
+                    latest_data = self.get_latest_data(n_frames=n_frames)[0]
                     if latest_data.size > 0:
                         # Return the entire buffer as a list of lists
                         data_json = latest_data.tolist()
@@ -918,10 +780,6 @@ def main():
                        help='Ring buffer length (default: 600)')
     parser.add_argument('--gc-interval', type=int, default=100,
                        help='Garbage collection interval in frames (default: 100)')
-    parser.add_argument('--plot-interval', type=int, default=0, # by default, no plotting 
-                       help='Plotting interval in seconds (0 = disable plotting, default: 10)')
-    parser.add_argument('--plot-dir', type=str, default='./figs/',
-                       help='Directory to save plots (default: ./figs/)')
     parser.add_argument('--log-level', type=str, default='INFO',
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                        help='Log level (default: INFO)')
@@ -929,7 +787,10 @@ def main():
                        help='Start a web server on localhost:9898 to display live spectrum data')
     parser.add_argument('--streaming-interval', type=float, default=0.5,
                        help='Streaming interval in seconds per frame (default: 0.5)')
-    # verbose
+    parser.add_argument('--save-all-to-file', action='store_true',
+                       help='Save all data to files', default=False)
+    parser.add_argument('--save-dir', type=str, default='/common/lwa/stream_spec_npz/',
+                       help='Directory to save data files (default: stream_spec_npz/)')
     parser.add_argument('--verbose', action='store_true',
                        help='Verbose output')
     
@@ -948,11 +809,11 @@ def main():
         stream_port=args.port,
         buffer_length=args.buffer_length,
         gc_interval=args.gc_interval,
-        plot_interval=args.plot_interval,
-        plot_dir=args.plot_dir,
         start_webshow=args.start_webshow,
         streaming_interval=args.streaming_interval,
-        verbose=args.verbose
+        verbose=args.verbose,
+        save_dir=args.save_dir,
+        save_all_to_file=args.save_all_to_file
     )
     
     try:
