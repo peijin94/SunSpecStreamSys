@@ -104,6 +104,14 @@
         .success {
             color: #7ee787;
         }
+        
+        #refreshButton:hover {
+            background: #0969da;
+        }
+        
+        #refreshButton:active {
+            background: #0550ae;
+        }
     </style>
 </head>
 <body>
@@ -118,11 +126,24 @@
         <div class="status">
             <div>Status: <span id="status">Connecting...</span></div>
             <div>Frames: <span id="frameCount">0</span></div>
-            <div>Update Rate: <span id="updateRateDisplay">4.0 fps</span></div>
+            <div>Update Rate: <span id="updateRateDisplay">2.0 fps</span></div>
             <div>Data Range: 10^4 to 10^9</div>
             <div>Last Update: <span id="lastUpdate">Never</span></div>
             <div>Detections: <span id="detectionCount">0</span></div>
             <div>Detection History: <span id="detectionHistoryCount">0</span></div>
+            <div style="margin-top: 20px;">
+                <button id="refreshButton" style="
+                    background: #1f6feb;
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    border-radius: 6px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    transition: background-color 0.2s;
+                ">Refresh Spectrum</button>
+            </div>
         </div>
     </div>
 
@@ -152,8 +173,9 @@
             // UI elements
             const $ = id => document.getElementById(id);
             const statusEl = $('status'), frameCountEl = $('frameCount');
-            const updateRateDisplayEl = $('updateRateDisplay'), lastUpdateEl = $('lastUpdate');
+            const updateRateDisplayEl = $('updateRateDisplay'), lastUpdateEl = $('lastUpdate'), fpsEl = $('fps');
             const detectionCountEl = $('detectionCount'), detectionHistoryCountEl = $('detectionHistoryCount');
+            const refreshButton = $('refreshButton');
 
             // Fixed update rate - no UI controls needed
             function syncLabels(){
@@ -385,6 +407,56 @@
                 }
             }
 
+            // Refresh function to get entire buffer and update spectrum
+            async function refreshSpectrum(){
+                try {
+                    refreshButton.disabled = true;
+                    refreshButton.textContent = 'Refreshing...';
+                    
+                    const response = await fetch('/live/refresh');
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.data && data.data.length > 0) {
+                            console.log(`Refresh: Received ${data.data.length} frames from buffer`);
+                            
+                            // Clear the current texture
+                            recreateTexture();
+                            
+                            // Write all frames from the buffer to the texture
+                            data.data.forEach((frameData, index) => {
+                                if (frameData && frameData.length === bins) {
+                                    writeRow(frameData);
+                                }
+                            });
+                            
+                            // Update status
+                            const now = new Date();
+                            const timeStr = now.getUTCHours().toString().padStart(2, '0') + ':' + 
+                                           now.getUTCMinutes().toString().padStart(2, '0') + ':' + 
+                                           now.getUTCSeconds().toString().padStart(2, '0');
+                            //lastUpdateEl.textContent = timeStr + '(UTC) - Refreshed';
+                            //statusEl.textContent = 'Refreshed';
+                            //statusEl.className = 'success';
+                            
+                            console.log(`Refresh: Updated spectrum with ${data.data.length} frames`);
+                        } else {
+                            console.log('Refresh: No data available in buffer');
+                            //statusEl.textContent = 'No Data Available';
+                            //statusEl.className = 'error';
+                        }
+                    } else {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    console.error('Error refreshing spectrum:', error);
+                    statusEl.textContent = 'Refresh Error';
+                    statusEl.className = 'error';
+                } finally {
+                    refreshButton.disabled = false;
+                    refreshButton.textContent = 'Reload Spectrum';
+                }
+            }
+
             // Detection fetching and tracking
             let latestDetections = [];
             let detectionHistory = []; // Store detections with timestamps for shifting
@@ -524,7 +596,7 @@
             }
 
             function loop(now){
-                const dt = Math.min(0.1, (now - lastT)/1000);
+                const dt = Math.min(0.2, (now - lastT)/1000);
                 lastT = now; 
                 acc += dt * updateRate;
                 detectionAcc += dt * 0.1; // 8 second interval (1/8 = 0.125)
@@ -533,8 +605,7 @@
                 if (running && acc >= 1){ 
                     fetchData(); 
                     blitToView();
-                    acc -= 1; 
-                }
+                    acc -= 1; }
 
                 // Fetch detections every 8 seconds
                 if (detectionAcc >= 1) {
@@ -548,21 +619,21 @@
                     cleanupAcc -= 1;
                 }
 
-                
-
                 frames++;
                 if (now - lastFpsT > 500){
-                    const fps = Math.round(2000*frames/(now-lastFpsT))/2;
-                    // fpsEl.textContent = fps + ' fps'; // Removed as per edit hint
+                    //const fps = Math.round(1000*(now-lastFpsT))/2;
+                    //fpsEl.textContent = fps + ' fps'; 
                     lastFpsT = now; frames = 0;
                 }
 
-                requestAnimationFrame(loop);
-            }
+                requestAnimationFrame(loop);}
 
             // Initialize
             recreateTexture();
             syncLabels();
+            
+            // Add event listener for refresh button
+            refreshButton.addEventListener('click', refreshSpectrum);
             
             // Start data fetching immediately
             fetchData();

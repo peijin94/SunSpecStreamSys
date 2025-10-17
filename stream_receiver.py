@@ -92,7 +92,7 @@ class StreamReceiver:
         self.socket.setsockopt(zmq.SUBSCRIBE, b"")  # Subscribe to all messages
         
         # Ring buffer: 600 x 768 (N_freq/4)
-        self.ring_buffer = np.zeros((buffer_length, 768), dtype=np.float32)
+        self.ring_buffer = np.zeros((self.buffer_length, 768), dtype=np.float32)
         self.buffer_index = 0
         
         # Data processing parameters
@@ -189,7 +189,6 @@ class StreamReceiver:
             # Import YOLO here to avoid import errors if not installed
             from ultralytics import YOLO
             
-
             
             # Load YOLO model
             model_path = 'model/best.pt'
@@ -282,7 +281,6 @@ class StreamReceiver:
         latest_data_jpg = self.save_latest_data_to_jpg()
         #latest_data_npz = self.save_latest_data_to_npz()
 
-        # Generate dummy detection results
         # For now, create random bounding boxes
         num_detections = np.random.randint(0, 8)  # 0-3 detections
         detections = []
@@ -311,8 +309,7 @@ class StreamReceiver:
                 'class': class_name,
                 'confidence': np.random.uniform(0.6, 0.95),
                 'bbox': [x, y, width, height],  # [x, y, width, height]
-                'timestamp': current_time
-            }
+                'timestamp': current_time}
             detections.append(detection)
         
         # Update latest detections with thread safety
@@ -551,6 +548,8 @@ class StreamReceiver:
                         if gc_counter >= self.gc_interval:
                             gc.collect()
                             gc_counter = 0
+
+                        print(f"idx: {self.buffer_index}", f"time: {time.time()}")
                     else:
                         self.log.warning(f"Unknown topic: {topic}")
 
@@ -823,8 +822,31 @@ class StreamReceiver:
                     'count': len(detections),
                     'last_detection_time': self.last_detection_time
                 }
-                print(response_data)
+                #print(response_data)
                 return jsonify(response_data)
+
+            @self.app.route('/refresh')
+            def refresh_data():
+                """Get the entire buffer array for refresh functionality"""
+                if self.buffer_index > 0:
+                    # Get all available data from the ring buffer
+                    latest_data = self.get_latest_data(n_frames=self.buffer_length)
+                    if latest_data.size > 0:
+                        # Return the entire buffer as a list of lists
+                        data_json = latest_data.tolist()
+                        return jsonify({
+                            'data': data_json,
+                            'buffer_length': self.buffer_length,
+                            'buffer_index': self.buffer_index,
+                            'timestamp': time.time()
+                        })
+                # Return empty data if no data available
+                return jsonify({
+                    'data': [],
+                    'buffer_length': self.buffer_length,
+                    'buffer_index': self.buffer_index,
+                    'timestamp': time.time()
+                })
 
             # Use fixed port 9527 for web server
             web_port = 9527
@@ -892,7 +914,7 @@ def main():
                        help='Stream address (default: 127.0.0.1)')
     parser.add_argument('--port', type=int, default=30002,
                        help='Stream port (default: 30002)')
-    parser.add_argument('--buffer-length', type=int, default=300,
+    parser.add_argument('--buffer-length', type=int, default=600,
                        help='Ring buffer length (default: 600)')
     parser.add_argument('--gc-interval', type=int, default=100,
                        help='Garbage collection interval in frames (default: 100)')
