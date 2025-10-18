@@ -271,6 +271,15 @@ def main():
     
     args = parser.parse_args()
     
+
+    if not args.date_dir:
+        args.date_dir = os.path.join(args.data_dir_root, datetime.now().strftime('%Y-%m-%d'))
+        if not os.path.exists(args.date_dir):
+            print(f"Error: Directory does not exist: {args.date_dir}")
+            return
+        print(f"Date directory: {args.date_dir}")
+        print("=" * 60)
+
     # Handle all-day mode
     if args.all_day:
         if not args.date_dir:
