@@ -348,7 +348,7 @@ def main():
                 print(f"[{utc_now.strftime('%Y-%m-%d %H:%M:%S')} UTC] Checking {data_dir}")
                 
                 # Check if directory exists
-                if not os.path.exists(data_dir):
+                if not os.path.exists(data_dir): # no data source
                     print(f"Directory does not exist yet: {data_dir}")
                 else:
                     # Try to plot the next chunk

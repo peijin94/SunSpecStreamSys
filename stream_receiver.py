@@ -162,8 +162,17 @@ class StreamReceiver:
         return f'{self.plot_dir}/latest_data.jpg'
 
 
-    def save_latest_data_to_npz(self, norm_factor=1e4*24, save_dir='./figs/', filename='latest_data.npz'): # norm factor to convert to sfu
+    def save_latest_data_to_npz(self, norm_factor=1e4*24, save_dir='./figs/',
+        filename='latest_data.npz', save_when_sun_up=True): # norm factor to convert to sfu
         """Save the latest data to a npz file"""
+
+
+        import check_sun_elevation
+        if save_when_sun_up:
+            if not check_sun_elevation.is_sun_up():
+                self.log.info("Sun is down, not saving data")
+                return
+
         latest_data, mjd_data = self.get_latest_data(n_frames=self.buffer_length, pol='I')
         latest_data_v = self.get_latest_data(n_frames=self.buffer_length, pol='V')[0]
 
