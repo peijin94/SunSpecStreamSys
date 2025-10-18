@@ -136,6 +136,7 @@ def plot_spectrums(npz_file_lst, save_plot=True, show_plot=False, output_path=No
             os.makedirs(output_dir, exist_ok=True)
         
         plt.savefig(plot_filename, dpi=120, bbox_inches='tight')
+        full_path_filename = os.path.abspath(plot_filename)
         print(f"Plot saved as: {plot_filename}")
     
     # Show plot if requested
@@ -144,7 +145,7 @@ def plot_spectrums(npz_file_lst, save_plot=True, show_plot=False, output_path=No
     else:
         plt.close()
     
-    return fig
+    return fig, full_path_filename
 
 def find_latest_npz(directory='/common/lwa/stream_spec_npz/'):
     """Find the latest NPZ file in the directory."""
@@ -156,7 +157,8 @@ def find_latest_npz(directory='/common/lwa/stream_spec_npz/'):
     latest_file = max(npz_files, key=os.path.getmtime)
     return latest_file
 
-def continues_plot(data_dir, out_dir, chunk_N=6, current_f_idx=0):
+def continues_plot(data_dir, out_dir, chunk_N=6, current_f_idx=0, make_latest_copy=True, 
+    latest_spectra_abs_fname='/common/webplots/lwa-data/latest_spectrum.png'):
     """
     Plot the next chunk of NPZ files from data_dir.
     
@@ -173,7 +175,8 @@ def continues_plot(data_dir, out_dir, chunk_N=6, current_f_idx=0):
         out_dir: Output directory for plots (e.g., /common/webplots/lwa-data/qlook_spectra)
         chunk_N: Number of files to plot together (default: 6)
         current_f_idx: Current file index (should be multiple of chunk_N)
-    
+        make_latest_copy: if yes, copy the output plot to /common/webplots/lwa-data/latest_spectrum.png
+
     Returns:
         int: Updated current_f_idx (index of next file to process), or current_f_idx if no plotting done
     """
@@ -228,8 +231,11 @@ def continues_plot(data_dir, out_dir, chunk_N=6, current_f_idx=0):
     print(f"Output: {output_path}")
     
     # Use plot_spectrums function
-    plot_spectrums(files_to_plot, save_plot=True, show_plot=False, output_path=output_path)
+    fig, full_path_filename = plot_spectrums(files_to_plot, save_plot=True, show_plot=False, output_path=output_path)
     
+    if make_latest_copy:
+        shutil.copy(full_path_filename, latest_spectra_abs_fname)
+
     # Return the next index (should be multiple of chunk_N)
     return end_idx
 
@@ -247,7 +253,7 @@ def main():
     parser.add_argument('--show', action='store_true', 
                        help='Show plots interactively')
     parser.add_argument('--live_plot', action='store_true',
-                       help='Continuously monitor and plot new data every 10 minutes')
+                       help='Continuously monitor and plot new data every N minutes')
     parser.add_argument('--all-day', action='store_true',
                        help='Plot all files in a date directory in chunks')
     parser.add_argument('--date-dir', default=None,
@@ -258,6 +264,10 @@ def main():
                        help='Root directory for data (default: /common/lwa/stream_spec_npz/)')
     parser.add_argument('--out-dir', default='/common/webplots/lwa-data/qlook_spectra',
                        help='Output directory for plots (default: /common/webplots/lwa-data/qlook_spectra)')
+    parser.add_argument('--wait-minutes', type=int, default=3,
+                       help='Wait time in minutes between checks (default: 5)')
+    parser.add_argument('--latest05min-plot-fname', default='/common/webplots/lwa-data/05min_plot.png',
+                       help='Latest 5 minutes plot file name (default: /common/webplots/lwa-data/05min_plot.png)')
     
     args = parser.parse_args()
     
@@ -314,7 +324,8 @@ def main():
         print(f"Output directory: {args.out_dir}")
         print(f"Checking every 10 minutes...")
         
-        current_f_idx = 0
+        n_files_in_dir = len(glob.glob(os.path.join(args.date_dir, '*.npz')))
+        current_f_idx = int(int(n_files_in_dir / args.chunk_size) * args.chunk_size)
         
         while True:
             try:
@@ -340,10 +351,14 @@ def main():
                         current_f_idx = new_idx
                     else:
                         print(f"No new chunks available yet.")
+
+                    newsest_npz_file = sorted(glob.glob(os.path.join(data_dir, '*.npz')))[-1]
+                    fig, full_path_filename = plot_spectrums(
+                        [newsest_npz_file], save_plot=True, show_plot=False, output_path=args.latest05min_plot_fname)
                 
-                # Wait 10 minutes
-                print(f"Waiting 10 minutes until next check...")
-                time.sleep(600)  # 10 minutes = 600 seconds
+                # Wait N minutes
+                print(f"Waiting {args.wait_minutes} minutes until next check...")
+                time.sleep(args.wait_minutes * 60)  # N minutes = N * 60 seconds
                 
             except KeyboardInterrupt:
                 print("\n\nStopping live plot mode...")
@@ -352,8 +367,8 @@ def main():
                 print(f"Error in live plot: {e}")
                 import traceback
                 traceback.print_exc()
-                print("Waiting 10 minutes before retry...")
-                time.sleep(600)
+                print(f"Waiting {args.wait_minutes} minutes before retry...")
+                time.sleep(args.wait_minutes * 60)
         
         return
     
