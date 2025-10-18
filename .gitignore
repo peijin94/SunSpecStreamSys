@@ -87,6 +87,17 @@ model/*
 # Figures
 figs/*
 
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.ico
+*.webp
+*.svg
+*.eps
+*.pdf
 
 # IPython
 profile_default/
