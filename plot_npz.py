@@ -35,6 +35,7 @@ Usage Examples:
     conda activate solarml && python3 plot_npz.py --all-day --date-dir /common/lwa/stream_spec_npz/2025-10-18/
 """
 
+import shutil
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.time import Time
@@ -334,7 +335,7 @@ def main():
         print(f"Checking every 10 minutes...")
         
         n_files_in_dir = len(glob.glob(os.path.join(args.date_dir, '*.npz')))
-        current_f_idx = int(int(n_files_in_dir / args.chunk_size) * args.chunk_size)
+        current_f_idx = int(int(n_files_in_dir / args.chunk_size -1) * args.chunk_size)
         
         while True:
             try:
