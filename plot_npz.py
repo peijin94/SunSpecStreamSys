@@ -96,8 +96,10 @@ def plot_spectrums(npz_file_lst, save_plot=True, show_plot=False, output_path=No
     fig, ax = plt.subplots(1, 1, figsize=(8, 3.5), dpi=120)
     
     # Waterfall plot (Stokes I)
-    vmax_plot = np.percentile(I_data, 99.5)
-    vmin_plot = np.percentile(I_data, 2)
+    vmax_plot = np.nanpercentile(I_data, 99.5)
+    vmin_plot = np.nanpercentile(I_data, 10)
+    vmin_plot = np.max([vmin_plot, 0.001])
+
     if I_data.shape[0] > 1:
         im = ax.imshow(I_data.T, aspect='auto', origin='lower', 
                       cmap='viridis', norm=plt.matplotlib.colors.LogNorm(vmax=vmax_plot, vmin=vmin_plot),
