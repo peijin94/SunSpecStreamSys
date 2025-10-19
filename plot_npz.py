@@ -197,6 +197,9 @@ def continues_plot(data_dir, out_dir, chunk_N=6, current_f_idx=0, make_latest_co
     # Check if we have enough files
     if end_idx > total_files:
         print(f"Not enough files: have {total_files}, need at least {end_idx}. Skipping plot.")
+        if end_idx > total_files + 24: # too far ahead
+            print(f"Too far ahead: {end_idx} > {total_files} + 24. Skipping plot.")
+            return int(int(total_files/chunk_N) * chunk_N)
         return current_f_idx
     
     # Get the files for this chunk
@@ -363,6 +366,7 @@ def main():
                         current_f_idx = new_idx
                     else:
                         print(f"No new chunks available yet.")
+
 
                     newsest_npz_file = sorted(glob.glob(os.path.join(data_dir, '*.npz')))[-1]
                     fig, full_path_filename = plot_spectrums(
