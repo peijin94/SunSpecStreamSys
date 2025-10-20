@@ -363,10 +363,10 @@ def main():
                     
                     if new_idx > current_f_idx:
                         print(f"Successfully plotted chunk. Updated index: {current_f_idx} → {new_idx}")
-                        current_f_idx = new_idx
                     else:
                         print(f"No new chunks available yet.")
 
+                    current_f_idx = new_idx
 
                     newsest_npz_file = sorted(glob.glob(os.path.join(data_dir, '*.npz')))[-1]
                     fig, full_path_filename = plot_spectrums(

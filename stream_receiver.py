@@ -221,7 +221,7 @@ class StreamReceiver:
                 return
             
             # Run YOLO prediction on the image
-            results = model.predict(image_path, conf=0.3, iou=0.6, verbose=False)
+            results = model.predict(image_path, conf=0.45, iou=0.6, verbose=False)
             
             # Process detection results
             detections = []
