@@ -150,13 +150,13 @@ class StreamReceiver:
         """
 
         latest_data = self.get_latest_data(n_frames=self.buffer_length)[0]
-        latest_data = np.flip(latest_data, axis=1)
-
+        # latest_data = np.flip(latest_data, axis=1)
         # use scikit-image to resize the image
+        
         from skimage.transform import resize
         data_out = resize(latest_data, out_size, anti_aliasing=True)
 
-        paint_arr_to_jpg(data_out/norm_factor, filename=f'{self.plot_dir}/latest_data.jpg', vmax=300, vmin=0.5, scaling='log')
+        paint_arr_to_jpg(data_out/norm_factor, filename=f'{self.plot_dir}/latest_data.jpg', vmax=200, vmin=0.5, scaling='log')
         #self.log.info(f"Latest data saved to {self.plot_dir}/latest_data.jpg")
 
         return f'{self.plot_dir}/latest_data.jpg'
@@ -205,7 +205,7 @@ class StreamReceiver:
             
             
             # Load YOLO model
-            model_path = 'model/best.pt'
+            model_path = 'model/best.v11.pt'
             if not os.path.exists(model_path):
                 self.log.error(f"YOLO model not found at {model_path}")
                 return
@@ -221,7 +221,7 @@ class StreamReceiver:
                 return
             
             # Run YOLO prediction on the image
-            results = model.predict(image_path, conf=0.45, iou=0.6, verbose=False)
+            results = model.predict(image_path, conf=0.8, iou=0.6, verbose=False)
             
             # Process detection results
             detections = []
@@ -240,8 +240,17 @@ class StreamReceiver:
                         
                         # Convert to normalized coordinates (x, y, width, height)
                         img_height, img_width = 640, 640  # Image size from save_latest_data_to_jpg
+
+                        # flip y coordinate
+                        y1 = img_height - y1
+                        y2 = img_height - y2
+                        
                         x = float(x1 / img_width)
                         y = float(y1 / img_height)
+                        
+                        # flip y coordinate
+                        #y = 1 - y
+                        
                         width = float((x2 - x1) / img_width)
                         height = float((y2 - y1) / img_height)
                         
