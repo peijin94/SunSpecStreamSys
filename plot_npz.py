@@ -123,6 +123,10 @@ def plot_spectrums(npz_file_lst, save_plot=True, show_plot=False, output_path=No
         ax1.set_xticks(tick_indices)
         ax1.set_xticklabels(tick_labels)
         
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax, aspect=22)
+        # cbar title inside the colorbar
+        #cbar.set_label('[s.f.u.]', labelpad=-35)
         # Colorbar for I
         cbar1 = plt.colorbar(im1, ax=ax1, aspect=22)
         cbar1.set_label('[s.f.u.]', labelpad=-35)

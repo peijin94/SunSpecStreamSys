@@ -205,7 +205,7 @@ class StreamReceiver:
             
             
             # Load YOLO model
-            model_path = 'model/best.v11.pt'
+            model_path = 'model/bestv8.iw.pt'
             if not os.path.exists(model_path):
                 self.log.error(f"YOLO model not found at {model_path}")
                 return
@@ -221,7 +221,7 @@ class StreamReceiver:
                 return
             
             # Run YOLO prediction on the image
-            results = model.predict(image_path, conf=0.8, iou=0.6, verbose=False)
+            results = model.predict(image_path, conf=0.6, iou=0.6, verbose=False)
             
             # Process detection results
             detections = []
