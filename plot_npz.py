@@ -7,7 +7,7 @@ The NPZ files contain spectrum data with:
 - mjd: Modified Julian Date timestamps
 - freq: Frequency array in MHz
 
-This script plots only the Stokes I waterfall plot (time vs frequency).
+This script plots Stokes I and V/I in two panels (time vs frequency).
 
 Usage Examples:
     # Plot the latest NPZ file
@@ -66,6 +66,10 @@ def load_npz_data(npz_file):
 def plot_spectrums(npz_file_lst, save_plot=True, show_plot=False, output_path=None):
     """Plot the spectrum data from a list of NPZ files.
     
+    Creates a two-panel plot with:
+    - Top panel: Stokes I (log scale, viridis colormap)
+    - Bottom panel: Stokes V/I (linear scale, RdBu_r colormap)
+    
     Args:
         npz_file_lst: List of NPZ file paths to plot
         save_plot: Whether to save the plot
@@ -92,35 +96,56 @@ def plot_spectrums(npz_file_lst, save_plot=True, show_plot=False, output_path=No
     # Convert MJD to datetime for plotting
     times = Time(mjd_times.flatten(), format='mjd').datetime
     
-    # Create figure with single subplot
-    fig, ax = plt.subplots(1, 1, figsize=(8, 3.5), dpi=120)
+    # Create figure with two panels
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 5), dpi=120)
     
-    # Waterfall plot (Stokes I)
-    vmax_plot = np.nanpercentile(I_data, 99.5)
-    vmin_plot = np.nanpercentile(I_data, 10)
-    vmin_plot = np.max([vmin_plot, 0.001])
+    # Compute color scale for I
+    I_vmax = np.nanpercentile(I_data[:, 80:-40], 99.5)  # ignore the edges of the plot
+    I_vmin = np.nanpercentile(I_data[:, 80:-40], 10)
+    I_vmin = np.max([I_vmin, 0.001])
+    
+    # Compute color scale for V (not used for V/I but keeping for consistency)
+    V_vmax = np.nanpercentile(np.abs(V_data[:, 80:-40]), 99.5)
+    V_vmin = np.max([np.nanpercentile(np.abs(V_data[:, 80:-40]), 10), 0.001])
 
     if I_data.shape[0] > 1:
-        im = ax.imshow(I_data.T, aspect='auto', origin='lower', 
-                      cmap='viridis', norm=plt.matplotlib.colors.LogNorm(vmax=vmax_plot, vmin=vmin_plot),
-                      extent=[0, len(times)-1, frequencies.min(), frequencies.max()])
-        ax.set_ylabel('Frequency (MHz)')
-        ax.set_xlabel('Time (UTC) on ' + times[0].strftime('%Y-%m-%d'))
+        # Plot Stokes I (top panel)
+        im1 = ax1.imshow(I_data.T, aspect='auto', origin='lower',
+                        cmap='viridis', norm=plt.matplotlib.colors.LogNorm(vmax=I_vmax, vmin=I_vmin),
+                        extent=[0, len(times)-1, frequencies.min(), frequencies.max()])
+        ax1.set_ylabel('Frequency (MHz)')
+        ax1.set_title('Stokes I')
         
-        # Set custom x-axis labels for time
+        # Set time labels for top panel
         n_ticks = min(5, len(times))  # Limit number of ticks
         tick_indices = np.linspace(1, len(times)-1, n_ticks, dtype=int)
         tick_labels = [times[i].strftime('%H:%M:%S') for i in tick_indices]
-        ax.set_xticks(tick_indices)
-        ax.set_xticklabels(tick_labels)
+        ax1.set_xticks(tick_indices)
+        ax1.set_xticklabels(tick_labels)
         
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax, aspect=22)
-        # cbar title inside the colorbar
-        cbar.set_label('[s.f.u.]', labelpad=-35)
+        # Colorbar for I
+        cbar1 = plt.colorbar(im1, ax=ax1, aspect=22)
+        cbar1.set_label('[s.f.u.]', labelpad=-35)
+        
+        # Plot Stokes V/I (bottom panel)
+        im2 = ax2.imshow((V_data/I_data).T, aspect='auto', origin='lower',
+                        cmap='RdBu_r', vmax=0.7, vmin=-0.7,
+                        extent=[0, len(times)-1, frequencies.min(), frequencies.max()])
+        ax2.set_ylabel('Frequency (MHz)')
+        ax2.set_xlabel('Time (UTC) on ' + times[0].strftime('%Y-%m-%d'))
+        ax2.set_title('Stokes V/I')
+        
+        # Set time labels for bottom panel
+        ax2.set_xticks(tick_indices)
+        ax2.set_xticklabels(tick_labels)
+        
+        # Colorbar for V/I
+        cbar2 = plt.colorbar(im2, ax=ax2, aspect=22)
     else:
-        ax.text(0.5, 0.5, 'Insufficient data for waterfall plot', 
-                ha='center', va='center', transform=ax.transAxes)
+        ax1.text(0.5, 0.5, 'Insufficient data for waterfall plot',
+                ha='center', va='center', transform=ax1.transAxes)
+        ax2.text(0.5, 0.5, 'Insufficient data for waterfall plot',
+                ha='center', va='center', transform=ax2.transAxes)
     
     # Adjust layout
     plt.tight_layout()
