@@ -117,7 +117,7 @@ def plot_spectrums(npz_file_lst, save_plot=True, show_plot=False, output_path=No
         # Add colorbar
         cbar = plt.colorbar(im, ax=ax, aspect=22)
         # cbar title inside the colorbar
-        cbar.set_label('[s.f.u.]', labelpad=-35)
+        #cbar.set_label('[s.f.u.]', labelpad=-35)
     else:
         ax.text(0.5, 0.5, 'Insufficient data for waterfall plot', 
                 ha='center', va='center', transform=ax.transAxes)
