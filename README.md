@@ -107,6 +107,29 @@ python3 stream_receiver.py --start-webshow --addr 127.0.0.1 --port 9798
 
 The web interface will be available at `http://localhost:9527`.
 
+### Frontend (React + Tailwind UI)
+
+The live spectrum UI is implemented as a React + Vite app in the `frontend/` folder.
+
+#### Development
+
+```bash
+cd frontend
+npm install        # once
+npm run dev        # opens http://localhost:5173
+```
+
+The dev server proxies API calls to the Flask backend on port 9527.
+
+#### Production build
+
+```bash
+cd frontend
+npm run build      # builds to frontend/dist
+```
+
+When `--start-webshow` is enabled, Flask will automatically serve the built SPA from `frontend/dist` at `http://localhost:9527/`. The legacy HTML view is still available at `http://localhost:9527/legacy`.
+
 ### Web Interface Architecture
 
 - **Backend**: Flask web server running in a separate thread

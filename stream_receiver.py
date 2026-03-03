@@ -27,7 +27,7 @@ import matplotlib.dates as mdates
 
 # Web server imports
 try:
-    from flask import Flask, render_template, jsonify
+    from flask import Flask, render_template, jsonify, send_from_directory
     from flask_cors import CORS
     from waitress import serve
     import threading
@@ -115,6 +115,12 @@ class StreamReceiver:
         self.last_detection_time = 0
         self.latest_detections = []  # Store latest detection results
         self.detection_lock = threading.Lock()  # Thread safety for detections
+
+        # AI summary (Gemini) of latest spectrum
+        self.ai_summary_interval = 60.0  # seconds
+        self.last_ai_summary_time = 0.0
+        self.latest_ai_summary = ""
+        self.ai_summary_lock = threading.Lock()
         
         # Setup logging
         self.setup_logging()
@@ -188,6 +194,67 @@ class StreamReceiver:
         np.savez(f'{save_dir}/{filename}', data=data_out/norm_factor, mjd=self.ring_arr_mjd, freq=freq_array)
         self.log.info(f"Latest data saved to {save_dir}/{filename}")
         return f'{save_dir}/{filename}'
+
+    def run_ai_summary(self):
+        """Generate an AI summary of the latest spectrum using Gemini."""
+        current_time = time.time()
+        if current_time - self.last_ai_summary_time < self.ai_summary_interval:
+            return
+
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            # Silent if not configured
+            return
+
+        try:
+            image_path = self.save_latest_data_to_jpg()
+            if not os.path.exists(image_path):
+                self.log.warning(f"AI summary: image not found at {image_path}")
+                return
+
+            # Gemini Python SDK (see https://ai.google.dev/gemini-api/docs)
+            from google import genai
+
+            client = genai.Client(api_key=api_key)
+
+            with open(image_path, "rb") as f:
+                img_bytes = f.read()
+
+            prompt = (
+                "read this spectrum from ovro-lwa, low frequency dynamic spectrum\n"
+                "5min segment, top to down is 16MHz to 85MHz, left to right is early to late. duration is 5min\n"
+                "describe what is in the spectrum whether it is radio burst or quiet sun\n"
+                "describe short and precise"
+            )
+
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=[
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": prompt},
+                            {
+                                "inline_data": {
+                                    "mime_type": "image/jpeg",
+                                    "data": img_bytes,
+                                }
+                            },
+                        ],
+                    }
+                ],
+            )
+
+            text = (getattr(response, "text", "") or "").strip()
+            if text:
+                with self.ai_summary_lock:
+                    self.latest_ai_summary = text
+                    self.last_ai_summary_time = current_time
+                if self.verbose:
+                    self.log.info(f"AI summary updated: {text}")
+        except Exception as e:
+            # Log and continue; AI summaries are optional
+            self.log.error(f"Error generating AI summary: {e}")
 
 
     def run_type3_detection(self):
@@ -493,6 +560,12 @@ class StreamReceiver:
             except Exception as e:
                 self.log.error(f"Error in receive loop: {str(e)}")
                 time.sleep(0.1)  # Wait a bit before retrying
+
+            # Periodically run AI summary (non-blocking throttle inside)
+            try:
+                self.run_ai_summary()
+            except Exception as e:
+                self.log.error(f"AI summary loop error: {e}")
         
         # Final garbage collection before stopping
         gc.collect()
@@ -668,11 +741,29 @@ class StreamReceiver:
             return
 
         try:
-            self.app = Flask(__name__)
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            frontend_dist = os.path.join(base_dir, 'frontend', 'dist')
+            self.app = Flask(
+                __name__,
+                static_folder=frontend_dist,
+                static_url_path='',
+            )
             CORS(self.app)
 
             @self.app.route('/')
             def index():
+                index_path = os.path.join(
+                    self.app.static_folder or '',
+                    'index.html',
+                )
+                if index_path and os.path.exists(index_path):
+                    return send_from_directory(
+                        self.app.static_folder, 'index.html'
+                    )
+                return render_template('index.html')
+
+            @self.app.route('/legacy')
+            def legacy_index():
                 return render_template('index.html')
 
             @self.app.route('/data')
@@ -726,6 +817,16 @@ class StreamReceiver:
                     'buffer_length': self.buffer_length,
                     'buffer_index': self.buffer_index,
                     'timestamp': time.time()
+                })
+
+            @self.app.route('/ai-summary')
+            def get_ai_summary():
+                with self.ai_summary_lock:
+                    summary = self.latest_ai_summary
+                    ts = self.last_ai_summary_time
+                return jsonify({
+                    'summary': summary,
+                    'timestamp': ts,
                 })
 
             # Use fixed port 9527 for web server
