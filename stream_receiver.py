@@ -26,17 +26,17 @@ os.environ['DISPLAY'] = ''
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-# Web server imports
+# Web server imports (FastAPI + ASGI server)
 try:
-    from flask import Flask, render_template, jsonify, send_from_directory, request
-    from flask_cors import CORS
-    from waitress import serve
+    from fastapi import FastAPI, Request
+    from fastapi.responses import JSONResponse, FileResponse
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.staticfiles import StaticFiles
+    import uvicorn
     import threading
-    FLASK_AVAILABLE = True
-    WAITRESS_AVAILABLE = True
+    WEB_AVAILABLE = True
 except ImportError as e:
-    FLASK_AVAILABLE = False
-    WAITRESS_AVAILABLE = False
+    WEB_AVAILABLE = False
     print(f"Warning: Web server dependencies not available ({e}). Web interface will be disabled.")
 
 def lwa_time_tag_to_datetime(time_tag: int, rate: float = 196_000_000) -> datetime:
@@ -230,22 +230,41 @@ class StreamReceiver:
         if not db_path:
             return
         try:
-            ip = req.headers.get('X-Forwarded-For', req.remote_addr or '')
-            if isinstance(ip, str) and ',' in ip:
-                ip = ip.split(',', 1)[0].strip()
-            path = req.path
-            user_agent = ''
+            headers = getattr(req, "headers", {}) or {}
+            # Normalize header keys to lowercase for safety
+            xff = None
             try:
-                user_agent = req.user_agent.string  # type: ignore[assignment]
+                xff = headers.get("x-forwarded-for") or headers.get("X-Forwarded-For")
             except Exception:
-                user_agent = str(req.user_agent)
+                pass
+
+            if xff:
+                ip = xff.split(",", 1)[0].strip()
+            else:
+                # FastAPI/Starlette style: request.client.host
+                client = getattr(req, "client", None)
+                ip = getattr(client, "host", "") if client else ""
+
+            path = getattr(getattr(req, "url", None), "path", "/")
+            user_agent = ""
+            try:
+                user_agent = headers.get("user-agent", "") or ""
+            except Exception:
+                user_agent = ""
+
+            # Skip noisy internal probes (e.g. python-requests health checks)
+            # and local 127.0.0.1 traffic, which are not real visitors.
+            if "python-requests" in user_agent.lower():
+                return
+            if ip in ("127.0.0.1", "::1", ""):
+                return
+
             visited_at = datetime.utcnow().isoformat() + 'Z'
 
             # Helpful debug log for IP issues
             self.log.info(
                 f"record_visit: path={path} ip={ip} "
-                f"xff={req.headers.get('X-Forwarded-For')} "
-                f"remote_addr={req.remote_addr}"
+                f"xff={xff} "
             )
 
             conn = sqlite3.connect(db_path)
@@ -799,109 +818,107 @@ class StreamReceiver:
             return None, None
 
     def start_webserver(self):
-        """Start the Waitress web server for live spectrum display"""
-        if not FLASK_AVAILABLE or not WAITRESS_AVAILABLE:
+        """Start the FastAPI web server for live spectrum display (via Gunicorn)"""
+        if not WEB_AVAILABLE:
             self.log.warning("Web server dependencies not available, cannot start web server.")
             return
 
         try:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             frontend_dist = os.path.join(base_dir, 'frontend', 'dist')
-            self.app = Flask(
-                __name__,
-                static_folder=frontend_dist,
-                static_url_path='',
-            )
-            CORS(self.app)
 
-            @self.app.route('/')
-            def index():
+            app = FastAPI()
+
+            # CORS configuration similar to previous Flask+CORS
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+
+            # Serve built frontend assets
+            assets_dir = os.path.join(frontend_dist, "assets")
+            if os.path.isdir(assets_dir):
+                app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+            @app.get("/")
+            async def index(request: Request):
                 # Record visitor for main SPA entry point
                 self.record_visit(request)
-                index_path = os.path.join(
-                    self.app.static_folder or '',
-                    'index.html',
-                )
+                index_path = os.path.join(frontend_dist, "index.html")
                 if index_path and os.path.exists(index_path):
-                    return send_from_directory(
-                        self.app.static_folder, 'index.html'
-                    )
-                return render_template('index.html')
+                    return FileResponse(index_path, media_type="text/html")
+                return JSONResponse(
+                    {"error": "frontend build not found"},
+                    status_code=500,
+                )
 
-            @self.app.route('/legacy')
-            def legacy_index():
-                # Record visitor for legacy view
-                self.record_visit(request)
-                return render_template('index.html')
-
-            @self.app.route('/data')
-            def get_data():
-                # Get the latest data from the ring buffer
+            @app.get("/data")
+            async def get_data():
                 if self.buffer_index > 0:
                     latest_data = self.get_latest_data(n_frames=1)[0]
                     if latest_data.size > 0:
-                        # Return the most recent frame as a list
                         data_json = latest_data[0].tolist()
-                        return jsonify(data_json)
-                # Return empty list if no data
-                return jsonify([])
+                        return JSONResponse(data_json)
+                return JSONResponse([])
 
-            @self.app.route('/type3detect')
-            def get_type3_detections():
-                """Get latest Type 3 radio burst detections"""
+            @app.get("/type3detect")
+            async def get_type3_detections():
                 with self.detection_lock:
                     detections = self.latest_detections.copy()
-                
-                # Add time anchor information
+
                 current_time = time.time()
                 response_data = {
-                    'detections': detections,
-                    'timestamp': current_time,
-                    'time_anchor': current_time,
-                    'count': len(detections),
-                    'last_detection_time': self.last_detection_time
+                    "detections": detections,
+                    "timestamp": current_time,
+                    "time_anchor": current_time,
+                    "count": len(detections),
+                    "last_detection_time": self.last_detection_time,
                 }
-                #print(response_data)
-                return jsonify(response_data)
+                return JSONResponse(response_data)
 
-            @self.app.route('/refresh')
-            def refresh_data(n_frames=600):
-                """Get the entire buffer array for refresh functionality"""
+            @app.get("/refresh")
+            async def refresh_data(n_frames: int = 600):
                 if self.buffer_index > 0:
-                    # Get all available data from the ring buffer
                     latest_data = self.get_latest_data(n_frames=n_frames)[0]
                     if latest_data.size > 0:
-                        # Return the entire buffer as a list of lists
                         data_json = latest_data.tolist()
-                        return jsonify({
-                            'data': data_json,
-                            'buffer_length': self.buffer_length,
-                            'buffer_index': self.buffer_index,
-                            'timestamp': time.time()
-                        })
-                # Return empty data if no data available
-                return jsonify({
-                    'data': [],
-                    'buffer_length': self.buffer_length,
-                    'buffer_index': self.buffer_index,
-                    'timestamp': time.time()
-                })
+                        return JSONResponse(
+                            {
+                                "data": data_json,
+                                "buffer_length": self.buffer_length,
+                                "buffer_index": self.buffer_index,
+                                "timestamp": time.time(),
+                            }
+                        )
+                return JSONResponse(
+                    {
+                        "data": [],
+                        "buffer_length": self.buffer_length,
+                        "buffer_index": self.buffer_index,
+                        "timestamp": time.time(),
+                    }
+                )
 
-            @self.app.route('/ai-summary')
-            def get_ai_summary():
+            @app.get("/ai-summary")
+            async def get_ai_summary():
                 with self.ai_summary_lock:
                     summary = self.latest_ai_summary
                     ts = self.last_ai_summary_time
-                return jsonify({
-                    'summary': summary,
-                    'timestamp': ts,
-                })
+                return JSONResponse(
+                    {
+                        "summary": summary,
+                        "timestamp": ts,
+                    }
+                )
 
-            @self.app.route('/visitors/recent')
-            def visitors_recent():
-                db_path = getattr(self, 'visitor_db_path', None)
+            @app.get("/visitors/recent")
+            async def visitors_recent():
+                db_path = getattr(self, "visitor_db_path", None)
                 if not db_path:
-                    return jsonify([])
+                    return JSONResponse([])
                 try:
                     conn = sqlite3.connect(db_path)
                     cur = conn.cursor()
@@ -917,24 +934,27 @@ class StreamReceiver:
                     conn.close()
                     data = [
                         {
-                            'visited_at_utc': r[0],
-                            'path': r[1],
-                            'ip': r[2],
-                            'user_agent': r[3],
+                            "visited_at_utc": r[0],
+                            "path": r[1],
+                            "ip": r[2],
+                            "user_agent": r[3],
                         }
                         for r in rows
                     ]
-                    return jsonify(data)
+                    return JSONResponse(data)
                 except Exception as e:
                     self.log.error(f"Failed to load recent visitors: {e}")
-                    return jsonify({'error': 'failed to load visitors'}), 500
+                    return JSONResponse(
+                        {"error": "failed to load visitors"},
+                        status_code=500,
+                    )
 
-            @self.app.route('/visitors/count')
-            def visitors_count():
+            @app.get("/visitors/count")
+            async def visitors_count():
                 """Return total number of recorded visits."""
-                db_path = getattr(self, 'visitor_db_path', None)
+                db_path = getattr(self, "visitor_db_path", None)
                 if not db_path:
-                    return jsonify({'count': 0})
+                    return JSONResponse({"count": 0})
                 try:
                     conn = sqlite3.connect(db_path)
                     cur = conn.cursor()
@@ -942,41 +962,53 @@ class StreamReceiver:
                     row = cur.fetchone()
                     conn.close()
                     count = int(row[0]) if row and row[0] is not None else 0
-                    return jsonify({'count': count})
+                    return JSONResponse({"count": count})
                 except Exception as e:
                     self.log.error(f"Failed to load visitor count: {e}")
-                    return jsonify({'count': 0, 'error': 'failed to load visitor count'}), 500
+                    return JSONResponse(
+                        {"count": 0, "error": "failed to load visitor count"},
+                        status_code=500,
+                    )
 
-            @self.app.route('/debug/request')
-            def debug_request():
+            @app.get("/debug/request")
+            async def debug_request(request: Request):
                 """Debug endpoint to inspect client IP and headers."""
                 try:
+                    headers = {k: v for k, v in request.headers.items()}
+                    client_host = request.client.host if request.client else None
                     info = {
-                        'remote_addr': request.remote_addr,
-                        'x_forwarded_for': request.headers.get('X-Forwarded-For'),
-                        'headers': {
-                            k: v for k, v in request.headers.items()
-                        },
+                        "client_host": client_host,
+                        "x_forwarded_for": headers.get("x-forwarded-for"),
+                        "headers": headers,
                     }
-                    return jsonify(info)
+                    return JSONResponse(info)
                 except Exception as e:
                     self.log.error(f"/debug/request failed: {e}")
-                    return jsonify({'error': 'debug failed'}), 500
+                    return JSONResponse({"error": "debug failed"}, status_code=500)
 
-            # Use fixed port 9527 for web server
+            self.app = app
             web_port = 9527
-            self.log.info(f"Web server starting on http://localhost:{web_port}")
-            
-            # Start waitress server in a separate thread
+            self.log.info(f"Web server starting on http://localhost:{web_port} (FastAPI + Uvicorn)")
+
+            def run_server():
+                # Reduce noisy access logs from Uvicorn; keep only warnings/errors.
+                uvicorn.run(
+                    self.app,
+                    host="127.0.0.1",
+                    port=web_port,
+                    log_level="warning",
+                    access_log=False,
+                )
+
             self.webserver_thread = threading.Thread(
-                target=lambda: serve(self.app, host='localhost', port=web_port, threads=4),
-                daemon=True
+                target=run_server,
+                daemon=True,
             )
             self.webserver_thread.start()
-            
-            # Wait a moment for server to start
+
+            # Give the server a brief moment to start
             time.sleep(2)
-            
+
         except Exception as e:
             self.log.error(f"Failed to start web server: {e}")
             
