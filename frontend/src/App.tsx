@@ -11,7 +11,12 @@ import {
 } from './components/ui/card';
 import * as React from 'react';
 import type { SpectrumCanvasHandle } from './features/spectrum/SpectrumCanvas';
-import { fetchAiSummary, fetchVisitorCount } from './api/client';
+import {
+  fetchAiSummary,
+  fetchVisitorCount,
+  fetchSunEphemeris,
+  type SunEphemeris,
+} from './api/client';
 import { Gemini } from '@lobehub/icons';
 
 function App() {
@@ -26,6 +31,8 @@ function App() {
     React.useState<'count' | 'list'>('count');
   const [visitorCount, setVisitorCount] =
     React.useState<number | null>(null);
+  const [sunEph, setSunEph] =
+    React.useState<SunEphemeris | null>(null);
 
   React.useEffect(() => {
     if (!spectrum.latestFrame) return;
@@ -88,11 +95,45 @@ function App() {
     };
   }, []);
 
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function loadEphemeris() {
+      try {
+        const data = await fetchSunEphemeris();
+        if (cancelled) return;
+        setSunEph(data);
+      } catch {
+        if (cancelled) return;
+        setSunEph(null);
+      }
+    }
+
+    loadEphemeris();
+    const id = window.setInterval(loadEphemeris, 60000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
   const handleRefresh = async () => {
     const frames = await spectrum.refresh();
     if (frames && frames.length) {
       canvasRef.current?.loadFrames(frames);
     }
+  };
+
+  const formatEphemTime = (value: string | undefined) => {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    });
   };
 
   return (
@@ -164,6 +205,66 @@ function App() {
                 <span>
                   {spectrum.lastUpdate ?? 'Never'}
                 </span>
+              </div>
+              <div className="flex items-center justify-between pt-1 text-xs">
+                <span className="text-slate-400">
+                  Sun ephemeris
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-200">
+                    EL:{' '}
+                    {sunEph && Number.isFinite(sunEph.el)
+                      ? sunEph.el.toFixed(1)
+                      : '–'}
+                    °, AZ:{' '}
+                    {sunEph && Number.isFinite(sunEph.az)
+                      ? sunEph.az.toFixed(1)
+                      : '–'}
+                    °
+                  </span>
+                  <div className="relative group">
+                    <button
+                      type="button"
+                      className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-200 hover:bg-slate-700"
+                    >
+                      Detail
+                    </button>
+                    <div className="pointer-events-none absolute right-0 z-10 mt-1 w-60 rounded-md border border-slate-700 bg-slate-900/95 p-2 text-[11px] text-slate-200 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                      {sunEph ? (
+                        <>
+                          <div>
+                            Sunrise (OVRO):{' '}
+                            {formatEphemTime(
+                              sunEph.sunrise,
+                            )}
+                          </div>
+                          <div>
+                            Sunset (OVRO):{' '}
+                            {formatEphemTime(
+                              sunEph.sunset,
+                            )}
+                          </div>
+                          {typeof sunEph.sunup === 'boolean' && (
+                            <div className="mt-1 flex items-center gap-1">
+                              <span>Sun up:</span>
+                              <span
+                                className={
+                                  sunEph.sunup
+                                    ? 'inline-flex items-center rounded-full border border-emerald-500/60 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300'
+                                    : 'inline-flex items-center rounded-full border border-slate-500/60 bg-slate-700/60 px-2 py-0.5 text-[10px] font-medium text-slate-200'
+                                }
+                              >
+                                {sunEph.sunup ? 'Yes' : 'No'}
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div>Loading ephemeris…</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="pt-3">
                 <Button
