@@ -8,6 +8,7 @@ import threading
 import logging
 import gc
 import os
+import sqlite3
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from astropy.time import Time
@@ -27,7 +28,7 @@ import matplotlib.dates as mdates
 
 # Web server imports
 try:
-    from flask import Flask, render_template, jsonify, send_from_directory
+    from flask import Flask, render_template, jsonify, send_from_directory, request
     from flask_cors import CORS
     from waitress import serve
     import threading
@@ -124,6 +125,9 @@ class StreamReceiver:
         
         # Setup logging
         self.setup_logging()
+
+        # Visitor logging database
+        self._init_visitor_db()
         
         self.log.info(f"StreamReceiver initialized: {stream_addr}:{stream_port}")
         if self.start_webshow:
@@ -194,6 +198,66 @@ class StreamReceiver:
         np.savez(f'{save_dir}/{filename}', data=data_out/norm_factor, mjd=self.ring_arr_mjd, freq=freq_array)
         self.log.info(f"Latest data saved to {save_dir}/{filename}")
         return f'{save_dir}/{filename}'
+
+    def _init_visitor_db(self):
+        """Initialize local SQLite database for visitor logging."""
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            self.visitor_db_path = os.path.join(base_dir, 'visitors.db')
+            conn = sqlite3.connect(self.visitor_db_path)
+            cur = conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS visits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    visited_at_utc TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    ip TEXT,
+                    user_agent TEXT
+                )
+                """
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            # If visitor DB fails, log and continue; core functionality should not break.
+            self.visitor_db_path = None
+            self.log.error(f"Failed to initialize visitor DB: {e}")
+
+    def record_visit(self, req):
+        """Record a single page visit in the visitor database."""
+        db_path = getattr(self, 'visitor_db_path', None)
+        if not db_path:
+            return
+        try:
+            ip = req.headers.get('X-Forwarded-For', req.remote_addr or '')
+            if isinstance(ip, str) and ',' in ip:
+                ip = ip.split(',', 1)[0].strip()
+            path = req.path
+            user_agent = ''
+            try:
+                user_agent = req.user_agent.string  # type: ignore[assignment]
+            except Exception:
+                user_agent = str(req.user_agent)
+            visited_at = datetime.utcnow().isoformat() + 'Z'
+
+            # Helpful debug log for IP issues
+            self.log.info(
+                f"record_visit: path={path} ip={ip} "
+                f"xff={req.headers.get('X-Forwarded-For')} "
+                f"remote_addr={req.remote_addr}"
+            )
+
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO visits (visited_at_utc, path, ip, user_agent) VALUES (?, ?, ?, ?)",
+                (visited_at, path, ip, user_agent[:512]),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            self.log.error(f"Failed to record visit: {e}")
 
     def run_ai_summary(self):
         """Generate an AI summary of the latest spectrum using Gemini."""
@@ -752,6 +816,8 @@ class StreamReceiver:
 
             @self.app.route('/')
             def index():
+                # Record visitor for main SPA entry point
+                self.record_visit(request)
                 index_path = os.path.join(
                     self.app.static_folder or '',
                     'index.html',
@@ -764,6 +830,8 @@ class StreamReceiver:
 
             @self.app.route('/legacy')
             def legacy_index():
+                # Record visitor for legacy view
+                self.record_visit(request)
                 return render_template('index.html')
 
             @self.app.route('/data')
@@ -828,6 +896,72 @@ class StreamReceiver:
                     'summary': summary,
                     'timestamp': ts,
                 })
+
+            @self.app.route('/visitors/recent')
+            def visitors_recent():
+                db_path = getattr(self, 'visitor_db_path', None)
+                if not db_path:
+                    return jsonify([])
+                try:
+                    conn = sqlite3.connect(db_path)
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        SELECT visited_at_utc, path, ip, user_agent
+                        FROM visits
+                        ORDER BY visited_at_utc DESC
+                        LIMIT 100
+                        """
+                    )
+                    rows = cur.fetchall()
+                    conn.close()
+                    data = [
+                        {
+                            'visited_at_utc': r[0],
+                            'path': r[1],
+                            'ip': r[2],
+                            'user_agent': r[3],
+                        }
+                        for r in rows
+                    ]
+                    return jsonify(data)
+                except Exception as e:
+                    self.log.error(f"Failed to load recent visitors: {e}")
+                    return jsonify({'error': 'failed to load visitors'}), 500
+
+            @self.app.route('/visitors/count')
+            def visitors_count():
+                """Return total number of recorded visits."""
+                db_path = getattr(self, 'visitor_db_path', None)
+                if not db_path:
+                    return jsonify({'count': 0})
+                try:
+                    conn = sqlite3.connect(db_path)
+                    cur = conn.cursor()
+                    cur.execute("SELECT COUNT(*) FROM visits")
+                    row = cur.fetchone()
+                    conn.close()
+                    count = int(row[0]) if row and row[0] is not None else 0
+                    return jsonify({'count': count})
+                except Exception as e:
+                    self.log.error(f"Failed to load visitor count: {e}")
+                    return jsonify({'count': 0, 'error': 'failed to load visitor count'}), 500
+
+            @self.app.route('/debug/request')
+            def debug_request():
+                """Debug endpoint to inspect client IP and headers."""
+                try:
+                    info = {
+                        'remote_addr': request.remote_addr,
+                        'x_forwarded_for': request.headers.get('X-Forwarded-For'),
+                        'headers': {
+                            k: v for k, v in request.headers.items()
+                        },
+                    }
+                    return jsonify(info)
+                except Exception as e:
+                    self.log.error(f"/debug/request failed: {e}")
+                    return jsonify({'error': 'debug failed'}), 500
 
             # Use fixed port 9527 for web server
             web_port = 9527

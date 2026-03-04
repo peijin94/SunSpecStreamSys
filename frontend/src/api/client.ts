@@ -53,6 +53,10 @@ export interface AiSummaryResponse {
   timestamp: number;
 }
 
+export interface VisitorCountResponse {
+  count: number;
+}
+
 export function fetchLatestData() {
   return fetchJson<SpectrumFrame>('/data');
 }
@@ -67,5 +71,9 @@ export function fetchDetections() {
 
 export function fetchAiSummary() {
   return fetchJson<AiSummaryResponse>('/ai-summary');
+}
+
+export function fetchVisitorCount() {
+  return fetchJson<VisitorCountResponse>('/visitors/count');
 }
 

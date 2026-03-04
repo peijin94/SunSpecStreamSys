@@ -137,6 +137,7 @@ When `--start-webshow` is enabled, Flask will automatically serve the built SPA 
 - **Data API**: RESTful endpoints for spectrum data and status
 - **Real-time Updates**: Automatic data fetching and display updates
 - **Ring Buffer Visualization**: Efficient waterfall display using offscreen canvas
+ - **Visitor Logging**: Each visit to the main UI (`/` or `/legacy`) is recorded in a local SQLite database (`visitors.db`) for simple analytics.
 
 ### Web Interface Dependencies
 
@@ -294,6 +295,7 @@ The receiver can be configured through:
 Both components provide comprehensive logging:
 - `AvgStreamingOp`: Logs streaming operations and data statistics
 - `StreamReceiver`: Logs connection status, data processing, and buffer updates
+ - Visitor logs can also be inspected by reading the local `visitors.db` SQLite file (and, optionally, via the `/visitors/recent` JSON endpoint if enabled).
 
 ### Status Monitoring
 

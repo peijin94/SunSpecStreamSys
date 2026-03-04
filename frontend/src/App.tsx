@@ -11,7 +11,7 @@ import {
 } from './components/ui/card';
 import * as React from 'react';
 import type { SpectrumCanvasHandle } from './features/spectrum/SpectrumCanvas';
-import { fetchAiSummary } from './api/client';
+import { fetchAiSummary, fetchVisitorCount } from './api/client';
 import { Gemini } from '@lobehub/icons';
 
 function App() {
@@ -24,6 +24,8 @@ function App() {
     React.useState<number | null>(null);
   const [eventsMode, setEventsMode] =
     React.useState<'count' | 'list'>('count');
+  const [visitorCount, setVisitorCount] =
+    React.useState<number | null>(null);
 
   React.useEffect(() => {
     if (!spectrum.latestFrame) return;
@@ -64,6 +66,28 @@ function App() {
     };
   }, []);
 
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function loadCount() {
+      try {
+        const data = await fetchVisitorCount();
+        if (cancelled) return;
+        if (typeof data.count === 'number') {
+          setVisitorCount(data.count);
+        }
+      } catch {
+        // ignore for now
+      }
+    }
+
+    loadCount();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleRefresh = async () => {
     const frames = await spectrum.refresh();
     if (frames && frames.length) {
@@ -79,7 +103,16 @@ function App() {
             OVRO LWA Live Spectrum
           </h1>
           <div className="text-xs text-slate-400">
-            StreamReceiver UI (React + Tailwind)
+            <span
+              role="img"
+              aria-label="wave"
+              className="mr-1"
+            >
+              👋
+            </span>
+            {visitorCount !== null
+              ? `Welcome as ${visitorCount.toLocaleString()} visitor`
+              : 'Welcome'}
           </div>
         </header>
 
