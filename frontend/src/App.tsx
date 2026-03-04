@@ -375,7 +375,7 @@ function App() {
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2">
                   <Gemini.Color size={18} />
-                  <CardTitle>AI summarize</CardTitle>
+                  <CardTitle>AI summary</CardTitle>
                 </div>
                 <span className="text-[10px] tracking-wide text-slate-500">
                   Powered by gemini-2.5-flash-lite
