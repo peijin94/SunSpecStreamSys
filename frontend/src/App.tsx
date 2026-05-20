@@ -378,7 +378,7 @@ function App() {
                   <CardTitle>AI summary</CardTitle>
                 </div>
                 <span className="text-[10px] tracking-wide text-slate-500">
-                  Powered by gemini-2.5-flash-lite
+                  Powered by gemini-3.1-flash-lite
                 </span>
               </div>
             </CardHeader>
