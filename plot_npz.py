@@ -92,6 +92,9 @@ def plot_spectrums(npz_file_lst, save_plot=True, show_plot=False, output_path=No
     # Extract I and V polarizations
     I_data = spectrum_data[:, :, 0]  # Stokes I
     V_data = spectrum_data[:, :, 1]  # Stokes V
+    VI_data = np.full(V_data.shape, np.nan, dtype=float)
+    valid_ratio = np.isfinite(I_data) & np.isfinite(V_data) & (I_data != 0)
+    np.divide(V_data, I_data, out=VI_data, where=valid_ratio)
     
     # Convert MJD to datetime for plotting
     times = Time(mjd_times.flatten(), format='mjd').datetime
@@ -123,16 +126,12 @@ def plot_spectrums(npz_file_lst, save_plot=True, show_plot=False, output_path=No
         ax1.set_xticks(tick_indices)
         ax1.set_xticklabels(tick_labels)
         
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax, aspect=22)
-        # cbar title inside the colorbar
-        #cbar.set_label('[s.f.u.]', labelpad=-35)
         # Colorbar for I
         cbar1 = plt.colorbar(im1, ax=ax1, aspect=22)
         cbar1.set_label('[s.f.u.]', labelpad=-35)
         
         # Plot Stokes V/I (bottom panel)
-        im2 = ax2.imshow((V_data/I_data).T, aspect='auto', origin='lower',
+        im2 = ax2.imshow(VI_data.T, aspect='auto', origin='lower',
                         cmap='RdBu_r', vmax=0.7, vmin=-0.7,
                         extent=[0, len(times)-1, frequencies.min(), frequencies.max()])
         ax2.set_ylabel('Frequency (MHz)')
