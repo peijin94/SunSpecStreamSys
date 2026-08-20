@@ -71,7 +71,7 @@ class StreamReceiver:
     """
     
     def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=600, gc_interval=100, 
-                 start_webshow=False, streaming_interval=0.5, verbose=False, plot_dir='./figs/', save_dir='./stream_spec_npz/', save_all_to_file=False):
+                 start_webshow=False, streaming_interval=0.5, verbose=False, plot_dir='./figs/', save_dir='./stream_spec_npz/', save_all_to_file=True):
         self.stream_addr = stream_addr
         self.stream_port = stream_port
         self.buffer_length = buffer_length
@@ -1072,8 +1072,9 @@ def main():
                        help='Start a web server on localhost:9898 to display live spectrum data')
     parser.add_argument('--streaming-interval', type=float, default=0.5,
                        help='Streaming interval in seconds per frame (default: 0.5)')
-    parser.add_argument('--save-all-to-file', action='store_true',
-                       help='Save all data to files', default=False)
+    parser.add_argument('--save-all-to-file', action=argparse.BooleanOptionalAction,
+                       help='Save completed ring buffers to NPZ files (default: enabled)',
+                       default=True)
     parser.add_argument('--save-dir', type=str, default='/common/lwa/stream_spec_npz/',
                        help='Directory to save data files (default: stream_spec_npz/)')
     parser.add_argument('--verbose', action='store_true',
