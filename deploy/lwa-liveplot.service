@@ -9,9 +9,9 @@ WorkingDirectory=%h/SunSpecStreamSys
 Environment=PYTHONUNBUFFERED=1
 Environment=MPLBACKEND=Agg
 ExecStart=%h/venvs/lwa-liveplot/bin/python %h/SunSpecStreamSys/plot_npz.py --live_plot --chunk-size 6 --data-dir-root /common/lwa/stream_spec_npz/ --out-dir /common/webplots/lwa-data/qlook_spectra --wait-minutes 3 --latest05min-plot-fname /common/webplots/lwa-data/05min_plot.png
-# Restart=always rather than on-failure: plot_npz.py exits 0 (not a failure) when
-# the day directory does not exist yet, e.g. when the service starts before the
-# first NPZ of a UTC day is written.
+# Restart=always rather than on-failure: plot_npz.py reports data problems by
+# printing and returning (exit 0) instead of raising, so an on-failure policy
+# would leave the service down after a clean exit.
 Restart=always
 RestartSec=30
 TimeoutStopSec=20

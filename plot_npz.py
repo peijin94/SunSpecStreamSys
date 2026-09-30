@@ -42,7 +42,7 @@ from astropy.time import Time
 import argparse
 import os
 import glob
-from datetime import datetime
+from datetime import datetime, timezone
 
 def load_npz_data(npz_file):
     """Load data from NPZ file and return structured data."""
@@ -299,7 +299,7 @@ def main():
     parser.add_argument('--out-dir', default='/common/webplots/lwa-data/qlook_spectra',
                        help='Output directory for plots (default: /common/webplots/lwa-data/qlook_spectra)')
     parser.add_argument('--wait-minutes', type=int, default=3,
-                       help='Wait time in minutes between checks (default: 5)')
+                       help='Wait time in minutes between checks (default: 3)')
     parser.add_argument('--latest05min-plot-fname', default='/common/webplots/lwa-data/05min_plot.png',
                        help='Latest 5 minutes plot file name (default: /common/webplots/lwa-data/05min_plot.png)')
     
@@ -307,12 +307,20 @@ def main():
     
 
     if not args.date_dir:
-        args.date_dir = os.path.join(args.data_dir_root, datetime.now().strftime('%Y-%m-%d'))
+        # UTC, to match the day directory the live loop derives from dt.now(timezone.utc)
+        args.date_dir = os.path.join(args.data_dir_root, datetime.now(timezone.utc).strftime('%Y-%m-%d'))
         if not os.path.exists(args.date_dir):
-            print(f"Error: Directory does not exist: {args.date_dir}")
-            return
-        print(f"Date directory: {args.date_dir}")
-        print("=" * 60)
+            if not args.live_plot:
+                print(f"Error: Directory does not exist: {args.date_dir}")
+                return
+            # In live mode the current day directory may not exist yet — e.g. the
+            # service starts just after UTC midnight, before the first NPZ is
+            # written. The loop re-derives the directory every iteration, so wait
+            # for the data instead of exiting.
+            print(f"Directory does not exist yet: {args.date_dir} — waiting in live mode.")
+        else:
+            print(f"Date directory: {args.date_dir}")
+            print("=" * 60)
 
     # Handle all-day mode
     if args.all_day:
@@ -365,7 +373,7 @@ def main():
         print(f"Starting live plot mode with chunk size {args.chunk_size}")
         print(f"Data directory root: {args.data_dir_root}")
         print(f"Output directory: {args.out_dir}")
-        print(f"Checking every 10 minutes...")
+        print(f"Checking every {args.wait_minutes} minutes...")
         
         n_files_in_dir = len(glob.glob(os.path.join(args.date_dir, '*.npz')))
         # Never start from a negative index: with zero files in the directory the
@@ -377,7 +385,7 @@ def main():
         while True:
             try:
                 # Get current UTC date for directory path
-                utc_now = dt.utcnow()
+                utc_now = dt.now(timezone.utc)
                 date_str = utc_now.strftime('%Y-%m-%d')
                 data_dir = os.path.join(args.data_dir_root, date_str)
                 
