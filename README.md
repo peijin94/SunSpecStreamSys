@@ -161,11 +161,22 @@ pip install -r requirements.txt
 
 ### Dependencies
 
-- `numpy` >= 1.19.0
-- `pyzmq` >= 22.0.0
-- `matplotlib` >= 3.3.0
-- `psutil` >= 5.8.0
-- `astropy` >= 4.0.0
+Install everything the receiver and its web interface need:
+
+```bash
+# In SunSpecStreamSys directory
+pip install -r requirements.txt
+```
+
+`requirements.txt` is annotated by component: stream ingestion (`pyzmq`),
+plotting (`numpy`, `matplotlib`, `Pillow`, `astropy`), Type 3 detection and live
+summary (`ultralytics`, `opencv-python`, `scikit-image`, `google-genai`), web
+interface (`fastapi`, `uvicorn`, `requests`), plus `psutil`/`gunicorn`, which no
+script in this repo imports.
+
+The standalone live plotter (`plot_npz.py`) needs only `numpy`, `matplotlib` and
+`astropy`; `deploy/requirements-liveplot.txt` is the pinned plotting-only set used
+by the `lwa-liveplot` service (see “Live plotter service” below).
 
 ### Headless Server Configuration
 

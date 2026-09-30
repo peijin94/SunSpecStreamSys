@@ -1,11 +1,35 @@
+# Dependencies for the full live system: the stream receiver
+# (stream_receiver.py, including its plotting thread, the optional YOLO
+# detection and the FastAPI web interface) and its helpers (util.py,
+# check_sun_elevation.py).
+#
+# The standalone live plotter (plot_npz.py) needs only numpy, matplotlib and
+# astropy; the pinned, plotting-only environment used by the `lwa-liveplot`
+# systemd service is deploy/requirements-liveplot.txt.
+
+# --- stream ingestion -------------------------------------------------------
+pyzmq>=22.0.0            # zmq: receiver socket (also used by examples/)
+
+# --- plotting (receiver plotting thread, util.py, plot_npz.py) --------------
 numpy>=1.19.0
-pyzmq>=22.0.0
 matplotlib>=3.3.0
-psutil>=5.8.0
-astropy>=4.0.0
-ultralytics>=8.0.0
-opencv-python>=4.5.0
-google-generativeai>=0.8.0
+Pillow>=9.0.0            # util.py: `from PIL import Image` (otherwise pulled in by matplotlib)
+astropy>=4.0.0           # receiver, plot_npz.py, check_sun_elevation.py
+
+# --- Type 3 detection and live AI summary inside the receiver ---------------
+ultralytics>=8.0.0       # stream_receiver.py: YOLO v8s burst detection (lazy import)
+opencv-python>=4.5.0     # required transitively by ultralytics; no direct import in this repo
+scikit-image>=0.19.0     # stream_receiver.py: `from skimage.transform import resize` (lazy import)
+google-genai>=1.0.0      # stream_receiver.py: `from google import genai` — the current Gemini SDK.
+                         # NOTE: the older `google-generativeai` package (google.generativeai) is
+                         # NOT what this code imports and must not be used as a substitute.
+
+# --- web interface (stream_receiver.py --start-webshow) ---------------------
 fastapi>=0.115.0
 uvicorn>=0.30.0
-gunicorn>=21.2.0
+requests>=2.28.0         # stream_receiver.py: health check against the local web server
+                         # (also used by tests/)
+
+# --- listed, but not referenced by any script in this repo ------------------
+psutil>=5.8.0            # no import found in code; kept for monitoring tooling
+gunicorn>=21.2.0         # no usage found; kept for deployments that front the web app with gunicorn
