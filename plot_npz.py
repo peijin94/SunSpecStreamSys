@@ -368,7 +368,11 @@ def main():
         print(f"Checking every 10 minutes...")
         
         n_files_in_dir = len(glob.glob(os.path.join(args.date_dir, '*.npz')))
-        current_f_idx = int(int(n_files_in_dir / args.chunk_size -1) * args.chunk_size)
+        # Never start from a negative index: with zero files in the directory the
+        # arithmetic below yields -chunk_size, and every later iteration would then
+        # slice npz_files[-N:0] (always empty), silently stopping the chunk plots
+        # for the rest of the day.
+        current_f_idx = max(0, int(int(n_files_in_dir / args.chunk_size - 1) * args.chunk_size))
         
         while True:
             try:

@@ -1,0 +1,24 @@
+[Unit]
+Description=OVRO-LWA live spectrum plotter (5 min and 30 min waterfall plots)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/SunSpecStreamSys
+Environment=PYTHONUNBUFFERED=1
+Environment=MPLBACKEND=Agg
+ExecStart=%h/venvs/lwa-liveplot/bin/python %h/SunSpecStreamSys/plot_npz.py --live_plot --chunk-size 6 --data-dir-root /common/lwa/stream_spec_npz/ --out-dir /common/webplots/lwa-data/qlook_spectra --wait-minutes 3 --latest05min-plot-fname /common/webplots/lwa-data/05min_plot.png
+# Restart=always rather than on-failure: plot_npz.py exits 0 (not a failure) when
+# the day directory does not exist yet, e.g. when the service starts before the
+# first NPZ of a UTC day is written.
+Restart=always
+RestartSec=30
+TimeoutStopSec=20
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=default.target

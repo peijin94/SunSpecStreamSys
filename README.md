@@ -305,3 +305,41 @@ The `StreamReceiver` provides status information:
 - Latest data statistics
 - **Current delay between data timestamp and real-time**
 
+---
+
+## Live plotter service (`plot_npz.py`)
+
+`plot_npz.py --live_plot` renders two products from the receiver's NPZ files every
+few minutes and is meant to run as a systemd **user** service (no root needed; the
+account needs lingering enabled — `loginctl enable-linger $USER` — so it starts at
+boot and survives logout).
+
+| Product | Flag | Destination |
+|---|---|---|
+| 5 min waterfall (newest NPZ only) | `--latest05min-plot-fname` | `/common/webplots/lwa-data/05min_plot.png` |
+| 30 min waterfall (chunk of 6 files ≈ 30 min) | `--out-dir`, `--chunk-size` | `/common/webplots/lwa-data/qlook_spectra/YYYY/MM/DD/YYYYMMDD-HHMMSS-lwa_beam.png` + latest copy at `/common/webplots/lwa-data/latest_spectrum.png` |
+
+### Install (deployed on `inti`)
+
+```bash
+git clone git@github.com:peijin94/SunSpecStreamSys.git ~/SunSpecStreamSys
+python3 -m venv ~/venvs/lwa-liveplot   # use /common/python/miniforge3/bin/python -m venv if python3-venv is missing
+~/venvs/lwa-liveplot/bin/pip install -r ~/SunSpecStreamSys/deploy/requirements-liveplot.txt
+install -m 0644 ~/SunSpecStreamSys/deploy/lwa-liveplot.service ~/.config/systemd/user/
+loginctl enable-linger "$USER"         # once
+systemctl --user daemon-reload
+systemctl --user enable --now lwa-liveplot.service
+```
+
+Status and logs: `systemctl --user status lwa-liveplot`,
+`journalctl --user -u lwa-liveplot -f`. The unit assumes `~/SunSpecStreamSys` and
+`~/venvs/lwa-liveplot`; adjust `ExecStart` if you install elsewhere.
+
+Operational notes:
+
+- Run **one instance only** — all instances write the same output files.
+- The unit sets `MPLBACKEND=Agg`; the plotter must not need a display.
+- Output files are overwritten, so a restart mid-day re-plots the last complete
+  chunk and continues; no state is persisted between runs.
+
+
