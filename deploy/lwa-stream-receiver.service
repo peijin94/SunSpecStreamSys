@@ -1,0 +1,32 @@
+[Unit]
+Description=OVRO-LWA SunSpecStream receiver (live spectrum stream -> 127.0.0.1:9527)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Several paths are resolved relative to the working directory
+# (model/bestv8.iw.pt, ./figs/, visitors.db, templates/), so it must be the checkout.
+WorkingDirectory=%h/SunSpecStreamSys
+Environment=PYTHONUNBUFFERED=1
+# CUDA libraries for the YOLO/Torch detection path, as in the interactive session.
+Environment=LD_LIBRARY_PATH=/usr/local/cuda/lib64
+# Supplies GEMINI_API_KEY for the optional live AI summary (file mode 0600).
+# Prefixed with '-' so a missing file is not fatal: the receiver still runs and
+# only the summary is skipped (it logs the error).
+EnvironmentFile=-%h/.config/lwa-stream-receiver.env
+# --port is the *incoming* stream source port (on ovsa: an ssh tunnel from the
+# correlator node); the web interface/API port is fixed at 9527 inside stream_receiver.py.
+ExecStart=%h/miniconda3/envs/solarml/bin/python %h/SunSpecStreamSys/stream_receiver.py --start-webshow --addr 127.0.0.1 --port 30005
+# Restart=always: the script reports data problems by logging and continuing, and
+# exits cleanly on Ctrl-C, so on-failure would leave it down after a clean exit.
+Restart=always
+RestartSec=15
+TimeoutStopSec=30
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=default.target

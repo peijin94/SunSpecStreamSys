@@ -201,6 +201,27 @@ python3 stream_receiver.py --start-webshow --addr [address] --port 9798
 
 The `[address]` should be `127.0.0.1` if this is on local machine (calim02).
 
+#### As a systemd service (deployed on `ovsa`)
+
+`deploy/lwa-stream-receiver.service` runs the receiver as a systemd **user**
+service: it keeps the checkout as the working directory, reads `GEMINI_API_KEY`
+from `~/.config/lwa-stream-receiver.env` (mode 0600 — without that file the
+receiver still runs, only the live AI summary is skipped), and restarts on exit.
+
+```bash
+install -m 0644 deploy/lwa-stream-receiver.service ~/.config/systemd/user/
+loginctl enable-linger "$USER"      # once, so it starts at boot and survives logout
+systemctl --user daemon-reload
+systemctl --user enable --now lwa-stream-receiver
+journalctl --user -u lwa-stream-receiver -f
+```
+
+Two port facts worth keeping in mind: `--port` is the **incoming stream source**
+(on `ovsa` that is an ssh tunnel from the correlator node), while the web
+interface / API port is **fixed at 9527** inside `stream_receiver.py`
+(`--start-webshow`), which is what Apache `/live/` and the dashboard consume.
+
+
 ### Starting the Stream
 
 1. **Start the OVRO data recorder** (this will automatically start `AvgStreamingOp`):
