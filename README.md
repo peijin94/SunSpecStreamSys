@@ -221,6 +221,18 @@ Two port facts worth keeping in mind: `--port` is the **incoming stream source**
 interface / API port is **fixed at 9527** inside `stream_receiver.py`
 (`--start-webshow`), which is what Apache `/live/` and the dashboard consume.
 
+The stream source itself is forwarded onto `ovsa`'s loopback by the companion
+unit `deploy/lwa-stream-tunnel.service` (autossh over the three-hop chain
+ovsa → ovro → lwamaas → calim3). It uses the dedicated key
+`~/.ssh/id_ed25519_lwa_tunnel`, which must be authorized on all three hops; both
+units are needed for live data, and both are independent of each other's
+processes.
+
+```bash
+install -m 0644 deploy/lwa-stream-tunnel.service ~/.config/systemd/user/
+systemctl --user enable --now lwa-stream-tunnel
+```
+
 
 ### Starting the Stream
 

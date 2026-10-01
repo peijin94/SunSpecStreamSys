@@ -1,0 +1,27 @@
+[Unit]
+Description=OVRO-LWA live-spectrum source tunnel (calim3:30005 -> ovsa:30005)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Three-hop chain defined in ovsa's ~/.ssh/config:
+#   ovsa -> ovro (peijinz@ssh.ovro.caltech.edu) -> lwamaas (ubuntu) -> calim3 (peijinz)
+# Auth uses the dedicated key ~/.ssh/id_ed25519_lwa_tunnel (authorized on all
+# three hops) and BatchMode, so it never needs an ssh-agent: the previous
+# hand-started chain only worked because an interactive session had one forwarded.
+ExecStart=/usr/lib/autossh/autossh -M 0 -N -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o ConnectTimeout=20 -L 127.0.0.1:30005:127.0.0.1:30005 calim3
+# Restart=always: ExitOnForwardFailure makes ssh exit when the forward cannot be
+# established (e.g. the port is still held), and ServerAlive* ends a dead link
+# within ~90 s; systemd then re-establishes the chain.
+Restart=always
+RestartSec=15
+TimeoutStopSec=15
+# The ssh -W helper processes of the jump chain stay in this unit's cgroup and
+# are cleaned up with it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=default.target
