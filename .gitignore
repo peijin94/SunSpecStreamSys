@@ -196,3 +196,6 @@ cython_debug/
 
 
 *.db
+# Frontend source helpers are not Python build output.
+!frontend/src/lib/
+!frontend/src/lib/**

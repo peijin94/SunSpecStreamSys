@@ -1,89 +1,57 @@
 import * as React from 'react';
-import {
-  fetchLatestData,
-  refreshSpectrum,
-  type SpectrumFrame,
-} from '../../api/client';
+import { fetchSpectrum, type SpectrumBatch, type SpectrumCursor } from '../../api/client';
 
-interface UseSpectrumResult {
-  status: 'idle' | 'loading' | 'error' | 'ok';
-  frameCount: number;
-  lastUpdate: string | null;
-  latestFrame: SpectrumFrame | null;
-  refresh: () => Promise<SpectrumFrame[] | null>;
-}
-
-export function useSpectrumPolling(
-  intervalMs = 512,
-): UseSpectrumResult {
-  const [status, setStatus] = React.useState<
-    UseSpectrumResult['status']
-  >('idle');
-  const [frameCount, setFrameCount] =
-    React.useState(0);
-  const [lastUpdate, setLastUpdate] =
-    React.useState<string | null>(null);
-  const [latestFrame, setLatestFrame] =
-    React.useState<SpectrumFrame | null>(null);
+export function useSpectrumPolling(intervalMs = 512) {
+  const [status, setStatus] = React.useState<'loading' | 'error' | 'ok'>('loading');
+  const [frameCount, setFrameCount] = React.useState(0);
+  const [lastUpdate, setLastUpdate] = React.useState<string | null>(null);
+  const [batch, setBatch] = React.useState<SpectrumBatch | null>(null);
+  const [refreshVersion, requestRefresh] = React.useReducer((n: number) => n + 1, 0);
 
   React.useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    let cursor: SpectrumCursor | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false;
 
     async function tick() {
+      if (controller.signal.aborted || inFlight || document.hidden) return;
+      inFlight = true;
       try {
-        const data = await fetchLatestData();
-        if (cancelled) return;
-        if (data && data.length > 0) {
-          setLatestFrame(data);
-          setFrameCount((c) => c + 1);
-          const now = new Date();
-          const timeStr = `${now
-            .getUTCHours()
-            .toString()
-            .padStart(2, '0')}:${now
-            .getUTCMinutes()
-            .toString()
-            .padStart(2, '0')}:${now
-            .getUTCSeconds()
-            .toString()
-            .padStart(2, '0')} (UTC)`;
-          setLastUpdate(timeStr);
-          setStatus('ok');
+        const data = await fetchSpectrum(cursor, controller.signal);
+        if (controller.signal.aborted) return;
+        cursor = { sequence: data.sequence, boot_id: data.boot_id };
+        setStatus('ok');
+        if (data.reset || data.I.length) setBatch(data);
+        if (data.I.length) {
+          setFrameCount((n) => n + data.I.length);
+          const latest = data.timestamps[data.timestamps.length - 1];
+          setLastUpdate(new Date(latest * 1000).toISOString().slice(11, 19) + ' (UTC)');
         }
       } catch {
-        if (!cancelled) {
-          setStatus('error');
-        }
+        if (!controller.signal.aborted) setStatus('error');
+      } finally {
+        inFlight = false;
+        if (!controller.signal.aborted) timer = setTimeout(tick, intervalMs);
       }
     }
 
-    setStatus('loading');
-    tick();
-    const id = window.setInterval(tick, intervalMs);
+    function onVisibilityChange() {
+      if (timer) clearTimeout(timer);
+      if (!document.hidden) void tick();
+    }
+
+    void tick();
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      cancelled = true;
-      window.clearInterval(id);
+      controller.abort();
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [intervalMs]);
-
-  const refresh = React.useCallback(async () => {
-    try {
-      const data = await refreshSpectrum();
-      if (!data.data || !data.data.length) {
-        return null;
-      }
-      return data.data;
-    } catch {
-      return null;
-    }
-  }, []);
+  }, [intervalMs, refreshVersion]);
 
   return {
-    status,
-    frameCount,
-    lastUpdate,
-    latestFrame,
-    refresh,
+    status, frameCount, lastUpdate, batch,
+    refresh: () => requestRefresh(),
   };
 }
-

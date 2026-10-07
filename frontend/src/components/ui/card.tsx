@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { cn } from '../../lib/utils';
 
-export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {}
+export type CardProps = React.HTMLAttributes<HTMLDivElement>;
 
 export function Card({ className, ...props }: CardProps) {
   return (
@@ -15,8 +15,7 @@ export function Card({ className, ...props }: CardProps) {
   );
 }
 
-export interface CardHeaderProps
-  extends React.HTMLAttributes<HTMLDivElement> {}
+export type CardHeaderProps = React.HTMLAttributes<HTMLDivElement>;
 
 export function CardHeader({ className, ...props }: CardHeaderProps) {
   return (
@@ -27,8 +26,7 @@ export function CardHeader({ className, ...props }: CardHeaderProps) {
   );
 }
 
-export interface CardTitleProps
-  extends React.HTMLAttributes<HTMLHeadingElement> {}
+export type CardTitleProps = React.HTMLAttributes<HTMLHeadingElement>;
 
 export function CardTitle({ className, ...props }: CardTitleProps) {
   return (
@@ -42,8 +40,7 @@ export function CardTitle({ className, ...props }: CardTitleProps) {
   );
 }
 
-export interface CardContentProps
-  extends React.HTMLAttributes<HTMLDivElement> {}
+export type CardContentProps = React.HTMLAttributes<HTMLDivElement>;
 
 export function CardContent({ className, ...props }: CardContentProps) {
   return (

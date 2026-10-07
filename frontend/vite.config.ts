@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => ({
     proxy: {
       '/data': 'http://localhost:9527',
       '/refresh': 'http://localhost:9527',
+      '/spectrum': 'http://localhost:9527',
       '/type3detect': 'http://localhost:9527',
     },
   },

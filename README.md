@@ -2,6 +2,60 @@
 
 This document describes the streaming system that consists of an `AvgStreamingOp` in the OVRO data recorder and a `StreamReceiver` in the SunSpecStreamSys repository.
 
+## Current `/live/` application
+
+On `ovsa`, `/live/` runs from `/home/peijin/SunSpecStreamSys` on branch
+`production/ovsa`, using the `lwa-stream-receiver` user unit. The FastAPI/Uvicorn
+backend listens on loopback port 9527; Apache publishes it at
+`https://ovsa.njit.edu/live/`. The companion tunnel forwards `calim3:30005` to
+loopback port 30005. The frontend uses React, TypeScript, Vite, and Tailwind.
+
+The ZeroMQ payload has shape `(1, 3072, 4)`, ordered as XX, YY, Re(XY), Im(XY).
+The receiver preserves its existing convention, `I = (XX + YY) / 2` and
+`V = Im(XY)`, then averages each group of four frequency channels into 768 bins.
+Both polarizations and the source UTC timestamp are published under one lock.
+Spectra use a 600-frame memory ring and NPZ archives; SQLite `visitors.db` stores
+visitor counts. Spectrum history in the browser is a five-minute window.
+
+The frontend displays aligned Stokes I and V panels. I uses a logarithmic scale
+from 10⁴ to 10⁸ raw units. V uses a symmetric signed logarithmic scale from
+−10⁸ to +10⁸ with a 10⁴ transition scale: blue is negative, white is zero, red
+is positive. Missing samples are black. Both panels retain the existing
+15–85 MHz display labels. Detection overlays remain on I.
+
+`GET /spectrum` returns paired `I`, `V`, and `timestamps` arrays with
+`sequence`, `first_sequence`, `boot_id`, and `reset`. Pass `since=<sequence>`
+and `boot_id=<boot_id>` to receive all new integrations since the previous
+request. An unchanged cursor returns empty arrays. A restart or expired cursor
+returns a full reset. `/data` and `/refresh` retain their existing I-only schemas.
+Under Apache these endpoints are prefixed with `/live/`.
+
+The browser uses `/spectrum?format=binary`. The `lwa-spectrum-iv-v1` format is
+a little-endian uint32 header length, space-padded UTF-8 JSON metadata aligned
+to eight bytes, float64 Unix timestamps, float32 I rows, then float32 V rows.
+Header fields include `rows`, `bins`, `dtype`, `byteorder`, and `order`.
+Responses support gzip and use `Cache-Control: no-store`.
+
+Rendering uses reusable offscreen textures, color lookup tables, and updates
+only the affected time columns. One animation callback paints both panels when
+data or size changes; idle spectra do not redraw. Polls never overlap, pause
+for hidden tabs, and catch up when the tab becomes visible. Half-second raster
+columns cover normal approximately 0.514-second integrations; longer gaps
+remain black. Refresh reloads both histories together.
+
+Validate changes with the receiver's Python environment and Node 20:
+
+```bash
+python -m unittest discover -s tests -p test_polarization_api.py -v
+cd frontend
+npm test
+npm run build
+npm run lint
+```
+
+The older examples below describe historical plotting options; use the current
+receiver's `--help` for supported command-line flags.
+
 
 ## Components
 
@@ -119,7 +173,7 @@ npm install        # once
 npm run dev        # opens http://localhost:5173
 ```
 
-The dev server proxies API calls to the Flask backend on port 9527.
+The dev server proxies API calls to the FastAPI backend on port 9527.
 
 #### Production build
 
@@ -128,11 +182,11 @@ cd frontend
 npm run build      # builds to frontend/dist
 ```
 
-When `--start-webshow` is enabled, Flask will automatically serve the built SPA from `frontend/dist` at `http://localhost:9527/`.
+When `--start-webshow` is enabled, FastAPI serves the built SPA from `frontend/dist` at `http://localhost:9527/`.
 
 ### Web Interface Architecture
 
-- **Backend**: Flask web server running in a separate thread
+- **Backend**: FastAPI/Uvicorn running in a separate thread
 - **Frontend**: HTML5 Canvas with JavaScript for real-time rendering
 - **Data API**: RESTful endpoints for spectrum data and status
 - **Real-time Updates**: Automatic data fetching and display updates
@@ -142,8 +196,8 @@ When `--start-webshow` is enabled, Flask will automatically serve the built SPA 
 ### Web Interface Dependencies
 
 The web interface requires additional Python packages:
-- `flask>=2.0.0` - Web framework
-- `flask-cors>=3.0.0` - Cross-origin resource sharing support
+- `fastapi` - Web framework, static files, and CORS middleware
+- `uvicorn` - ASGI server
 
 Install with:
 ```bash
@@ -385,5 +439,4 @@ Operational notes:
 - The unit sets `MPLBACKEND=Agg`; the plotter must not need a display.
 - Output files are overwritten, so a restart mid-day re-plots the last complete
   chunk and continues; no state is persisted between runs.
-
 

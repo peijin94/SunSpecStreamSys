@@ -22,7 +22,9 @@ import { Gemini } from '@lobehub/icons';
 function App() {
   const spectrum = useSpectrumPolling();
   const detections = useDetectionsPolling();
-  const canvasRef =
+  const intensityRef =
+    React.useRef<SpectrumCanvasHandle | null>(null);
+  const circularRef =
     React.useRef<SpectrumCanvasHandle | null>(null);
   const [aiSummary, setAiSummary] = React.useState('');
   const [aiSummaryTime, setAiSummaryTime] =
@@ -35,14 +37,14 @@ function App() {
     React.useState<SunEphemeris | null>(null);
 
   React.useEffect(() => {
-    if (!spectrum.latestFrame) return;
-    canvasRef.current?.pushFrame(
-      spectrum.latestFrame,
-    );
-  }, [spectrum.latestFrame]);
+    if (!spectrum.batch) return;
+    const { I, V, timestamps, reset } = spectrum.batch;
+    intensityRef.current?.updateFrames(I, timestamps, reset);
+    circularRef.current?.updateFrames(V, timestamps, reset);
+  }, [spectrum.batch]);
 
   React.useEffect(() => {
-    canvasRef.current?.setDetections(
+    intensityRef.current?.setDetections(
       detections.detections,
     );
   }, [detections.detections]);
@@ -118,13 +120,6 @@ function App() {
     };
   }, []);
 
-  const handleRefresh = async () => {
-    const frames = await spectrum.refresh();
-    if (frames && frames.length) {
-      canvasRef.current?.loadFrames(frames);
-    }
-  };
-
   const formatEphemTime = (value: string | undefined) => {
     if (!value) return '—';
     const d = new Date(value);
@@ -157,13 +152,29 @@ function App() {
           </div>
         </header>
 
-        <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
-          <div className="aspect-[5/2] w-full">
-            <SpectrumCanvas
-              ref={canvasRef}
-              className="h-full w-full"
-            />
-          </div>
+        <section aria-label="Live Stokes I and V spectra" className="grid gap-4">
+          <section aria-labelledby="intensity-title" className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
+              <h2 id="intensity-title" className="text-sm font-semibold">Stokes I · Total intensity</h2>
+              <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                <span>10⁴</span>
+                <span className="h-2 w-24 rounded-full" style={{ background: 'linear-gradient(to right, #000004, #55106d, #bb3754, #f98c0a, #fcffa4)' }} />
+                <span>10⁸</span><span>Log · raw units</span>
+              </div>
+            </div>
+            <SpectrumCanvas ref={intensityRef} polarization="I" className="h-[230px] w-full sm:h-[280px]" />
+          </section>
+          <section aria-labelledby="circular-title" className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
+              <h2 id="circular-title" className="text-sm font-semibold">Stokes V · Circular polarization</h2>
+              <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                <span>−10⁸</span>
+                <span className="relative h-2 w-24 rounded-full bg-gradient-to-r from-blue-600 via-slate-100 to-red-500" aria-label="Blue negative, white zero, red positive" />
+                <span>+10⁸</span><span>Signed log · raw units</span>
+              </div>
+            </div>
+            <SpectrumCanvas ref={circularRef} polarization="V" className="h-[230px] w-full sm:h-[280px]" />
+          </section>
         </section>
 
         <section className="grid gap-6 md:grid-cols-3">
@@ -269,10 +280,10 @@ function App() {
               <div className="pt-3">
                 <Button
                   className="w-full"
-                  onClick={handleRefresh}
+                  onClick={spectrum.refresh}
                   variant="outline"
                 >
-                  Refresh Spectrum
+                  Refresh I / V
                 </Button>
               </div>
             </CardContent>

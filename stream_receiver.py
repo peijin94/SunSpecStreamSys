@@ -9,6 +9,8 @@ import logging
 import gc
 import os
 import sqlite3
+import uuid
+import struct
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from astropy.time import Time
@@ -28,10 +30,11 @@ import matplotlib.dates as mdates
 
 # Web server imports (FastAPI + ASGI server)
 try:
-    from fastapi import FastAPI, Request
-    from fastapi.responses import JSONResponse, FileResponse
+    from fastapi import FastAPI, Request, HTTPException
+    from fastapi.responses import JSONResponse, FileResponse, Response
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.staticfiles import StaticFiles
+    from starlette.middleware.gzip import GZipMiddleware
     import uvicorn
     import threading
     WEB_AVAILABLE = True
@@ -91,6 +94,9 @@ class StreamReceiver:
         self.ring_buffer_v = np.zeros((self.buffer_length, 768), dtype=np.float32)
         self.buffer_index = 0
         self.ring_arr_mjd = np.zeros((self.buffer_length, 1), dtype=np.float64)
+        self.buffer_lock = threading.RLock()
+        self.frames_received = 0
+        self.boot_id = uuid.uuid4().hex
         
         self.save_all_to_file = save_all_to_file
         self.save_dir = save_dir
@@ -532,16 +538,16 @@ class StreamReceiver:
             averaged_data = np.mean(pol_data_reshaped, axis=1)  # Shape: (768,)
             averaged_data_v = np.mean(pol_data_v_reshaped, axis=1)  # Shape: (768,)
 
-            # Update ring buffer
-            self.ring_buffer[self.buffer_index, :] = averaged_data
-            self.ring_buffer_v[self.buffer_index, :] = averaged_data_v
-
-            # Update buffer index (circular)
-            self.buffer_index = (self.buffer_index + 1) % self.buffer_length
-
-            # update ring_arr_mjd
             string_time = header["last_block_time"]
-            self.ring_arr_mjd[self.buffer_index, 0] = Time(string_time, format='iso', scale='utc').mjd
+            frame_mjd = Time(string_time, format='iso', scale='utc').mjd
+            # Publish both polarizations and their timestamp as one integration.
+            with self.buffer_lock:
+                index = self.buffer_index
+                self.ring_buffer[index, :] = averaged_data
+                self.ring_buffer_v[index, :] = averaged_data_v
+                self.ring_arr_mjd[index, 0] = frame_mjd
+                self.buffer_index = (index + 1) % self.buffer_length
+                self.frames_received += 1
             
             # Calculate delay between data timestamp and current time
             if self.delay_method == 'manual':
@@ -803,19 +809,76 @@ class StreamReceiver:
         if n_frames > self.buffer_length:
             n_frames = self.buffer_length
         
-        # Calculate indices for the most recent frames
-        indices = []
-        for i in range(n_frames):
-            idx = (self.buffer_index - 1 - i) % self.buffer_length
-            indices.append(idx)
+        with self.buffer_lock:
+            indices = (np.arange(self.buffer_index - n_frames,
+                                 self.buffer_index) % self.buffer_length)
+            if pol == 'I':
+                values = self.ring_buffer[indices].copy()
+            elif pol == 'V':
+                values = self.ring_buffer_v[indices].copy()
+            else:
+                raise ValueError(f"Invalid polarization: {pol}")
+            return values, self.ring_arr_mjd[indices].copy()
 
-        if pol == 'I':
-            return self.ring_buffer[indices[::-1]], self.ring_arr_mjd[indices[::-1]]
-        elif pol == 'V':
-            return self.ring_buffer_v[indices[::-1]], self.ring_arr_mjd[indices[::-1]]
-        else:
-            raise ValueError(f"Invalid polarization: {pol}")  
-            return None, None
+    def _get_spectrum_arrays(self, since=None, boot_id=None):
+        """Copy a matching I/V batch, including rows missed between browser polls.
+
+        Cursors belong to one receiver process. A restart or a cursor older than
+        the ring returns a full reset; an unchanged cursor returns no new rows.
+        Array copies happen under the ingest lock, serialization happens after it.
+        """
+        with self.buffer_lock:
+            sequence = self.frames_received
+            available = min(sequence, self.buffer_length)
+            reset = (since is None or boot_id != self.boot_id or since < 0
+                     or since > sequence or sequence - since > available)
+            count = available if reset else sequence - since
+            indices = (np.arange(self.buffer_index - count,
+                                 self.buffer_index) % self.buffer_length)
+            intensity = self.ring_buffer[indices].copy()
+            circular = self.ring_buffer_v[indices].copy()
+            times = self.ring_arr_mjd[indices, 0].copy()
+            index = self.buffer_index
+        metadata = {
+            'sequence': sequence,
+            'first_sequence': sequence - count + 1 if count else None,
+            'boot_id': self.boot_id,
+            'reset': reset,
+            'buffer_length': self.buffer_length,
+            'buffer_index': index,
+            'timestamp': time.time(),
+        }
+        return metadata, intensity, circular, (times - 40587.0) * 86400.0
+
+    def get_spectrum_snapshot(self, since=None, boot_id=None):
+        metadata, intensity, circular, times = self._get_spectrum_arrays(since, boot_id)
+        # Corrupt/non-finite samples remain missing, rather than invalid JSON.
+        def json_rows(values):
+            if np.isfinite(values).all():
+                return values.tolist()
+            rows = values.astype(object)
+            rows[~np.isfinite(values)] = None
+            return rows.tolist()
+        return {
+            'I': json_rows(intensity),
+            'V': json_rows(circular),
+            'timestamps': times.tolist(),
+            **metadata,
+        }
+
+    def get_spectrum_binary(self, since=None, boot_id=None):
+        """Aligned header + float64 times + float32 I/V, without JSON array copies."""
+        metadata, intensity, circular, times = self._get_spectrum_arrays(since, boot_id)
+        metadata.update(schema='lwa-spectrum-iv-v1', rows=len(times), bins=768,
+                        dtype='float32', byteorder='little', order=['I', 'V'])
+        header = json.dumps(metadata, separators=(',', ':')).encode('utf-8')
+        header += b' ' * (-(4 + len(header)) % 8)
+        return b''.join((
+            struct.pack('<I', len(header)), header,
+            times.astype('<f8', copy=False).tobytes(),
+            intensity.astype('<f4', copy=False).tobytes(),
+            circular.astype('<f4', copy=False).tobytes(),
+        ))
 
     def start_webserver(self):
         """Start the FastAPI web server for live spectrum display (via Gunicorn)"""
@@ -828,6 +891,7 @@ class StreamReceiver:
             frontend_dist = os.path.join(base_dir, 'frontend', 'dist')
 
             app = FastAPI()
+            app.add_middleware(GZipMiddleware, minimum_size=1024)
 
             # CORS configuration similar to previous Flask+CORS
             app.add_middleware(
@@ -857,12 +921,22 @@ class StreamReceiver:
 
             @app.get("/data")
             async def get_data():
-                if self.buffer_index > 0:
+                if self.frames_received > 0:
                     latest_data = self.get_latest_data(n_frames=1)[0]
                     if latest_data.size > 0:
                         data_json = latest_data[0].tolist()
                         return JSONResponse(data_json)
                 return JSONResponse([])
+
+            @app.get("/spectrum")
+            async def get_spectrum(since: int = None, boot_id: str = None, format: str = 'json'):
+                headers = {'Cache-Control': 'no-store'}
+                if format == 'binary':
+                    return Response(self.get_spectrum_binary(since, boot_id),
+                                    media_type='application/octet-stream', headers=headers)
+                if format != 'json':
+                    raise HTTPException(status_code=400, detail='Unknown spectrum format')
+                return JSONResponse(self.get_spectrum_snapshot(since, boot_id), headers=headers)
 
             @app.get("/type3detect")
             async def get_type3_detections():
@@ -881,7 +955,7 @@ class StreamReceiver:
 
             @app.get("/refresh")
             async def refresh_data(n_frames: int = 600):
-                if self.buffer_index > 0:
+                if self.frames_received > 0:
                     latest_data = self.get_latest_data(n_frames=n_frames)[0]
                     if latest_data.size > 0:
                         data_json = latest_data.tolist()

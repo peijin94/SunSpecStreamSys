@@ -1,3 +1,6 @@
+import { decodeSpectrum, type SpectrumBatch, type SpectrumCursor } from './spectrumProtocol';
+export type { PolarizedFrame, SpectrumBatch, SpectrumCursor } from './spectrumProtocol';
+
 const DEFAULT_API_BASE =
   import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -31,6 +34,18 @@ async function fetchText(path: string): Promise<string> {
 }
 
 export type SpectrumFrame = number[];
+
+export async function fetchSpectrum(
+  cursor?: SpectrumCursor,
+  signal?: AbortSignal,
+): Promise<SpectrumBatch> {
+  const query = cursor
+    ? `?format=binary&since=${cursor.sequence}&boot_id=${encodeURIComponent(cursor.boot_id)}`
+    : '?format=binary';
+  const res = await fetch(buildUrl(`/spectrum${query}`), { signal });
+  if (!res.ok) throw new Error(`Spectrum request failed: ${res.status}`);
+  return decodeSpectrum(await res.arrayBuffer());
+}
 
 export interface RefreshResponse {
   data: SpectrumFrame[];
@@ -116,4 +131,3 @@ export async function fetchSunEphemeris(): Promise<SunEphemeris> {
     raw: txt,
   };
 }
-

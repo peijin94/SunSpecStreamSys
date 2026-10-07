@@ -1,402 +1,232 @@
 import * as React from 'react';
-import type { SpectrumFrame } from '../../api/client';
-import type { Detection } from '../../api/client';
+import type { Detection, PolarizedFrame } from '../../api/client';
+import {
+  COLOR_TABLES, colorIndex, timeSlot, firstCoveredSlot,
+  FREQUENCY_BINS, TIME_COLUMNS, TIME_WINDOW_SECONDS,
+  type Polarization,
+} from './spectrumRendering';
 
 export interface SpectrumCanvasHandle {
-  pushFrame: (frame: SpectrumFrame) => void;
-  loadFrames: (frames: SpectrumFrame[]) => void;
+  updateFrames: (frames: PolarizedFrame[], timestamps: number[], reset: boolean) => void;
   setDetections: (detections: Detection[]) => void;
 }
 
 interface SpectrumCanvasProps {
   className?: string;
+  polarization: Polarization;
 }
 
-interface Engine {
-  pushFrame: (frame: SpectrumFrame) => void;
-  loadFrames: (frames: SpectrumFrame[]) => void;
-  setDetections: (detections: Detection[]) => void;
-  dispose: () => void;
+interface Engine extends SpectrumCanvasHandle { dispose: () => void }
+
+// One animation callback for all dirty panels, and no redraw loop when idle.
+const dirtyPanels = new Set<() => void>();
+let animationFrame: number | null = null;
+function requestPaint(paint: () => void) {
+  dirtyPanels.add(paint);
+  if (animationFrame !== null) return;
+  animationFrame = requestAnimationFrame(() => {
+    animationFrame = null;
+    const panels = Array.from(dirtyPanels);
+    dirtyPanels.clear();
+    panels.forEach((draw) => draw());
+  });
 }
 
-function createEngine(canvas: HTMLCanvasElement): Engine {
-  const ctx = canvas.getContext('2d', {
-    alpha: false,
-    desynchronized: true,
-  })!;
+function createEngine(canvas: HTMLCanvasElement, polarization: Polarization): Engine {
+  const ctx = canvas.getContext('2d', { alpha: false })!;
+  const texture = document.createElement('canvas');
+  texture.width = TIME_COLUMNS;
+  texture.height = FREQUENCY_BINS;
+  const textureContext = texture.getContext('2d', { alpha: false })!;
+  const image = textureContext.createImageData(TIME_COLUMNS, FREQUENCY_BINS);
+  const colors = COLOR_TABLES[polarization];
+  const dirtyColumns = new Set<number>();
+  let fullUpload = true;
+  let latestSlot: number | null = null;
+  let latestTimestamp: number | null = null;
+  let detections: Detection[] = [];
+  let disposed = false;
+  const columnFor = (slot: number) => ((slot % TIME_COLUMNS) + TIME_COLUMNS) % TIME_COLUMNS;
 
-  const tex = document.createElement('canvas');
-  const tctx = tex.getContext('2d', {
-    alpha: false,
-    desynchronized: true,
-  })!;
-
-  const bins = 768;
-  const heightLines = 600;
-  let writeX = heightLines - 1;
-  let frameCount = 0;
-  let running = true;
-
-  let detectionHistory: Detection[] = [];
-
-  let columnImage: ImageData | null = null;
-
-  let dataMin = 1e4;
-  let dataMax = 1e8;
-  const freqMin = 15;
-  const freqMax = 85;
-
-  function recreateTexture() {
-    tex.width = heightLines;
-    tex.height = bins;
-    tctx.fillStyle = '#000';
-    tctx.fillRect(0, 0, tex.width, tex.height);
-    columnImage = tctx.createImageData(1, bins);
-    writeX = heightLines - 1;
-  }
-
-  function toIdx(v: number) {
-    if (v < dataMin) v = dataMin;
-    if (v > dataMax) v = dataMax;
-    const logV = Math.log(v) / Math.LN10;
-    const t =
-      (logV - Math.log(dataMin) / Math.LN10) /
-      ((Math.log(dataMax) / Math.LN10) -
-        (Math.log(dataMin) / Math.LN10));
-    return t;
-  }
-
-  function infernoColormap(intensity: number) {
-    const t = intensity;
-
-    if (t < 0.25) {
-      const s = t / 0.25;
-      return {
-        r: Math.round(4 * s * (1 - s) * 255),
-        g: 0,
-        b: Math.round((1 - 4 * s * (1 - s)) * 255),
-      };
+  function clearColumn(column: number) {
+    for (let y = 0; y < FREQUENCY_BINS; y += 1) {
+      const offset = (y * TIME_COLUMNS + column) * 4;
+      image.data[offset] = 0;
+      image.data[offset + 1] = 0;
+      image.data[offset + 2] = 0;
+      image.data[offset + 3] = 255;
     }
-    if (t < 0.5) {
-      const s = (t - 0.25) / 0.25;
-      return {
-        r: 0,
-        g: Math.round(s * 255),
-        b: Math.round((1 - s) * 255),
-      };
+    dirtyColumns.add(column);
+  }
+
+  function flushTexture() {
+    if (fullUpload || dirtyColumns.size > TIME_COLUMNS / 2) {
+      textureContext.putImageData(image, 0, 0);
+    } else {
+      // Upload adjacent columns together; a wrapped batch needs two short spans.
+      const columns = Array.from(dirtyColumns).sort((a, b) => a - b);
+      for (let i = 0; i < columns.length;) {
+        const first = columns[i];
+        let last = first;
+        while (i + 1 < columns.length && columns[i + 1] === last + 1) {
+          i += 1;
+          last = columns[i];
+        }
+        textureContext.putImageData(image, 0, 0, first, 0, last - first + 1, FREQUENCY_BINS);
+        i += 1;
+      }
     }
-    if (t < 0.75) {
-      const s = (t - 0.5) / 0.25;
-      return {
-        r: Math.round(s * 255),
-        g: Math.round(255),
-        b: Math.round((1 - s) * 255),
-      };
-    }
-    const s = (t - 0.75) / 0.25;
-    return {
-      r: Math.round(255),
-      g: Math.round(255),
-      b: Math.round(s * 255),
-    };
+    dirtyColumns.clear();
+    fullUpload = false;
   }
 
-  function writeRow(dataArray: SpectrumFrame) {
-    if (!columnImage) return;
-    if (!dataArray || dataArray.length !== bins) return;
-
-    const columnData = columnImage.data;
-
-    for (let y = 0; y < bins; y += 1) {
-      const flippedY = bins - 1 - y;
-      const intensity = toIdx(dataArray[y]);
-      const colors = infernoColormap(intensity);
-      const q = flippedY * 4;
-      columnData[q] = colors.r;
-      columnData[q + 1] = colors.g;
-      columnData[q + 2] = colors.b;
-      columnData[q + 3] = 255;
-    }
-
-    tctx.putImageData(columnImage, writeX, 0);
-    writeX = (writeX + 1) % heightLines;
-    frameCount += 1;
-  }
-
-  function drawFrequencyScale(
-    canvasWidth: number,
-    canvasHeight: number,
-  ) {
-    ctx.save();
-    ctx.fillStyle = '#9fb0c2';
-    ctx.font = '18px monospace';
-    ctx.textAlign = 'right';
-
-    const frequencies = [15, 25, 35, 45, 55, 65, 75, 85];
-    frequencies.forEach((freq) => {
-      const freqRatio =
-        (freqMax - freq) / (freqMax - freqMin);
-      const y =
-        50 + freqRatio * (canvasHeight - 120);
-      ctx.fillText(`${freq}MHz`, 145, y + 4);
-
-      ctx.strokeStyle = '#222';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(200, y);
-      ctx.lineTo(canvasWidth - 40, y);
-      ctx.stroke();
-    });
-
-    ctx.restore();
-  }
-
-  function drawTimeScale(
-    canvasWidth: number,
-    canvasHeight: number,
-  ) {
-    ctx.save();
-    ctx.fillStyle = '#9fb0c2';
-    ctx.font = '18px monospace';
-    ctx.textAlign = 'center';
-
-    const timeLabels = ['Now', '-75s', '-150s', '-225s', '-300s'];
-    timeLabels.forEach((label, index) => {
-      const timeRatio =
-        (timeLabels.length - 1 - index) /
-        (timeLabels.length - 1);
-      const x =
-        200 + timeRatio * (canvasWidth - 240);
-      ctx.fillText(label, x, canvasHeight - 25);
-
-      ctx.strokeStyle = '#222';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x, 50);
-      ctx.lineTo(x, canvasHeight - 70);
-      ctx.stroke();
-    });
-
-    ctx.restore();
-  }
-
-  function drawDetections(
-    canvasWidth: number,
-    canvasHeight: number,
-  ) {
-    if (!detectionHistory.length) return;
-
-    ctx.save();
-
-    const plotWidth = canvasWidth - 240;
-    const plotHeight = canvasHeight - 120;
-    const plotX = 200;
-    const plotY = 50;
-
-    const timeWindow = 300;
-    const currentTime = Date.now() / 1000;
-
-    detectionHistory.forEach((detection) => {
-      const [x, y, width, height] = detection.bbox;
-      const confidence = detection.confidence;
-      const classId = detection.class_id;
-      const className = detection.class;
-      const detectionTime =
-        // prefer last_detection_time style timestamp if present
-        (detection as any).detectionTime ??
-        detection.timestamp;
-
-      const timeOffset = currentTime - detectionTime;
-      if (timeOffset > timeWindow) return;
-
-      const timeRatio = timeOffset / timeWindow;
-      const timeX = -timeRatio * plotWidth;
-
-      const canvasX =
-        plotX + timeX + x * plotWidth;
-      const canvasY =
-        plotY + y * plotHeight;
-      const canvasWidthBox = width * plotWidth;
-      const canvasHeightBox = height * plotHeight;
-
-      if (
-        canvasX < plotX ||
-        canvasX > plotX + plotWidth
-      )
-        return;
-
-      let strokeColor: string;
-      if (classId === 0) strokeColor = '#ff0000';
-      else if (classId === 1) strokeColor = '#ffffff';
-      else strokeColor = '#ffff00';
-
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(
-        canvasX,
-        canvasY,
-        canvasWidthBox,
-        canvasHeightBox,
-      );
-
-      ctx.fillStyle = strokeColor;
-      ctx.font = '16px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(
-        `${className} ${(confidence * 100).toFixed(1)}%`,
-        canvasX + 2,
-        canvasY - 4,
-      );
-    });
-
-    ctx.restore();
-  }
-
-  function blitToView() {
-    const W = canvas.width;
-    const H = canvas.height;
-
-    ctx.clearRect(0, 0, W, H);
-
-    const plotWidth = W - 240;
-    const plotHeight = H - 120;
-    const scaleX = plotWidth / heightLines;
-
-    const leftPortion = heightLines - writeX;
-    if (leftPortion > 0) {
-      const leftWidth = leftPortion * scaleX;
-      ctx.drawImage(
-        tex,
-        writeX,
-        0,
-        leftPortion,
-        bins,
-        200,
-        50,
-        leftWidth,
-        plotHeight,
-      );
-    }
-
-    if (writeX > 0) {
-      const rightWidth = writeX * scaleX;
-      const rightX = 200 + leftPortion * scaleX;
-      ctx.drawImage(
-        tex,
-        0,
-        0,
-        writeX,
-        bins,
-        rightX,
-        50,
-        rightWidth,
-        plotHeight,
-      );
-    }
-
-    drawFrequencyScale(W, H);
-    drawTimeScale(W, H);
-    drawDetections(W, H);
-  }
-
-  function resize() {
-    const dpr = Math.min(
-      2,
-      window.devicePixelRatio || 1,
-    );
+  function paint() {
+    if (disposed) return;
+    flushTexture();
     const rect = canvas.getBoundingClientRect();
-    const w = Math.floor(rect.width * dpr);
-    const h = Math.floor(rect.height * dpr);
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w;
-      canvas.height = h;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const width = Math.max(1, Math.round(rect.width * dpr));
+    const height = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = rect.width;
+    const h = rect.height;
+    const left = 64;
+    const top = 16;
+    const plotWidth = Math.max(1, w - left - 16);
+    const plotHeight = Math.max(1, h - top - 36);
+    ctx.fillStyle = '#020617';
+    ctx.fillRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = false;
+
+    const first = latestSlot === null ? 0 : columnFor(latestSlot + 1);
+    const leftColumns = TIME_COLUMNS - first;
+    ctx.drawImage(texture, first, 0, leftColumns, FREQUENCY_BINS,
+      left, top, plotWidth * leftColumns / TIME_COLUMNS, plotHeight);
+    if (first) {
+      ctx.drawImage(texture, 0, 0, first, FREQUENCY_BINS,
+        left + plotWidth * leftColumns / TIME_COLUMNS, top,
+        plotWidth * first / TIME_COLUMNS, plotHeight);
+    }
+
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.15)';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'right';
+    for (const frequency of [15, 25, 35, 45, 55, 65, 75, 85]) {
+      const y = top + (85 - frequency) / 70 * plotHeight;
+      ctx.fillText(`${frequency}`, left - 10, y + 4);
+      ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + plotWidth, y); ctx.stroke();
+    }
+    ctx.save();
+    ctx.translate(15, top + plotHeight / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('Frequency (MHz)', 0, 0);
+    ctx.restore();
+
+    for (let tick = 0; tick <= 4; tick += 1) {
+      const x = left + plotWidth * tick / 4;
+      ctx.textAlign = tick === 0 ? 'left' : tick === 4 ? 'right' : 'center';
+      ctx.fillText(tick === 4 ? 'Latest' : `−${TIME_WINDOW_SECONDS * (1 - tick / 4)}s`, x, h - 13);
+      ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + plotHeight); ctx.stroke();
+    }
+
+    if (polarization === 'I' && latestTimestamp !== null) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(left, top, plotWidth, plotHeight); ctx.clip();
+      for (const detection of detections) {
+        const age = latestTimestamp - detection.timestamp;
+        if (age > TIME_WINDOW_SECONDS) continue;
+        const [x, y, boxWidth, boxHeight] = detection.bbox;
+        const boxX = left + (x - age / TIME_WINDOW_SECONDS) * plotWidth;
+        const boxY = top + y * plotHeight;
+        ctx.strokeStyle = detection.class_id === 0 ? '#f87171' : '#f8fafc';
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(boxX, boxY, boxWidth * plotWidth, boxHeight * plotHeight);
+        ctx.textAlign = 'left';
+        ctx.fillText(`${detection.class} ${Math.round(detection.confidence * 100)}%`, boxX + 3, Math.max(top + 12, boxY - 4));
+      }
+      ctx.restore();
     }
   }
 
-  function setDetections(detections: Detection[]) {
-    detectionHistory = detections.slice();
-  }
-
-  let lastT = performance.now();
-  let acc = 0;
-  const updateRate = 1 / 0.512;
-
-  function loop(now: number) {
-    if (!running) return;
-    const dt = Math.min(0.2, (now - lastT) / 1000);
-    lastT = now;
-    acc += dt * updateRate;
-
-    if (acc >= 1) {
-      blitToView();
-      acc -= 1;
-    }
-
-    requestAnimationFrame(loop);
-  }
-
-  recreateTexture();
-  resize();
-  window.addEventListener('resize', resize);
-  requestAnimationFrame(loop);
+  const observer = new ResizeObserver(() => requestPaint(paint));
+  observer.observe(canvas);
+  requestPaint(paint);
 
   return {
-    pushFrame: (frame: SpectrumFrame) => {
-      writeRow(frame);
+    updateFrames(frames, timestamps, reset) {
+      if (reset) {
+        image.data.fill(0);
+        latestSlot = null;
+        latestTimestamp = null;
+        fullUpload = true;
+      }
+      frames.forEach((frame, index) => {
+        if (frame.length !== FREQUENCY_BINS || !Number.isFinite(timestamps[index])) return;
+        const slot = timeSlot(timestamps[index]);
+        if (latestSlot !== null && slot < latestSlot) return;
+        const firstCovered = firstCoveredSlot(latestTimestamp, timestamps[index]);
+        if (latestSlot !== null && slot - latestSlot >= TIME_COLUMNS) {
+          image.data.fill(0);
+          fullUpload = true;
+        } else if (latestSlot !== null) {
+          // Preserve true elapsed time: missing integrations stay black.
+          for (let gap = latestSlot + 1; gap < firstCovered; gap += 1) clearColumn(columnFor(gap));
+        }
+        for (let covered = firstCovered; covered <= slot; covered += 1) {
+          const column = columnFor(covered);
+          for (let channel = 0; channel < FREQUENCY_BINS; channel += 1) {
+            const color = colorIndex(frame[channel], polarization);
+            const offset = ((FREQUENCY_BINS - channel - 1) * TIME_COLUMNS + column) * 4;
+            image.data[offset] = color < 0 ? 0 : colors[color * 4];
+            image.data[offset + 1] = color < 0 ? 0 : colors[color * 4 + 1];
+            image.data[offset + 2] = color < 0 ? 0 : colors[color * 4 + 2];
+            image.data[offset + 3] = 255;
+          }
+          dirtyColumns.add(column);
+        }
+        latestSlot = slot;
+        latestTimestamp = timestamps[index];
+      });
+      if (reset || frames.length) requestPaint(paint);
     },
-    loadFrames: (frames: SpectrumFrame[]) => {
-      recreateTexture();
-      frames.forEach((f) => writeRow(f));
+    setDetections(next) {
+      if (JSON.stringify(next) === JSON.stringify(detections)) return;
+      detections = next.slice();
+      requestPaint(paint);
     },
-    setDetections,
-    dispose: () => {
-      running = false;
-      window.removeEventListener('resize', resize);
+    dispose() {
+      disposed = true;
+      observer.disconnect();
+      dirtyPanels.delete(paint);
     },
   };
 }
 
-export const SpectrumCanvas = React.forwardRef<
-  SpectrumCanvasHandle,
-  SpectrumCanvasProps
->(({ className }, ref) => {
-  const canvasRef =
-    React.useRef<HTMLCanvasElement | null>(null);
-  const engineRef = React.useRef<Engine | null>(null);
-
-  React.useEffect(() => {
-    if (!canvasRef.current) return;
-    const engine = createEngine(canvasRef.current);
-    engineRef.current = engine;
-    return () => {
-      engine.dispose();
-      engineRef.current = null;
-    };
-  }, []);
-
-  React.useImperativeHandle(ref, () => ({
-    pushFrame: (frame) => {
-      engineRef.current?.pushFrame(frame);
-    },
-    loadFrames: (frames) => {
-      engineRef.current?.loadFrames(frames);
-    },
-    setDetections: (detections) => {
-      engineRef.current?.setDetections(detections);
-    },
-  }));
-
-  return (
-    <div
-      className={className}
-    >
-      <canvas
-        ref={canvasRef}
-        className="h-full w-full"
-      />
-    </div>
-  );
-});
-
+export const SpectrumCanvas = React.forwardRef<SpectrumCanvasHandle, SpectrumCanvasProps>(
+  ({ className, polarization }, ref) => {
+    const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+    const engineRef = React.useRef<Engine | null>(null);
+    React.useEffect(() => {
+      if (!canvasRef.current) return;
+      const engine = createEngine(canvasRef.current, polarization);
+      engineRef.current = engine;
+      return () => { engine.dispose(); engineRef.current = null; };
+    }, [polarization]);
+    React.useImperativeHandle(ref, () => ({
+      updateFrames: (frames, times, reset) => engineRef.current?.updateFrames(frames, times, reset),
+      setDetections: (detections) => engineRef.current?.setDetections(detections),
+    }), []);
+    return (
+      <canvas ref={canvasRef} className={className} role="img"
+        aria-label={`Stokes ${polarization} spectrum: frequency against the last five minutes`} />
+    );
+  },
+);
 SpectrumCanvas.displayName = 'SpectrumCanvas';
-
