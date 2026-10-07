@@ -11,6 +11,7 @@ import os
 import sqlite3
 import uuid
 import struct
+from spectrum_time import time_raster, source_box
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from astropy.time import Time
@@ -30,7 +31,7 @@ import matplotlib.dates as mdates
 
 # Web server imports (FastAPI + ASGI server)
 try:
-    from fastapi import FastAPI, Request, HTTPException
+    from fastapi import FastAPI, Request, HTTPException, Query
     from fastapi.responses import JSONResponse, FileResponse, Response
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.staticfiles import StaticFiles
@@ -120,12 +121,17 @@ class StreamReceiver:
         # Type 3 detection (radio burst detection)
         self.detection_interval = 5.0  # Detection interval in seconds
         self.last_detection_time = 0
+        self.last_detection_attempt = 0
+        self.detection_confidence = 0.55
+        self.detection_model = None
+        self.detection_window = {}
         self.latest_detections = []  # Store latest detection results
         self.detection_lock = threading.Lock()  # Thread safety for detections
 
         # AI summary (Gemini) of latest spectrum
         self.ai_summary_interval = 60.0  # seconds
         self.last_ai_summary_time = 0.0
+        self.last_ai_attempt = 0.0
         self.latest_ai_summary = ""
         self.ai_summary_lock = threading.Lock()
         
@@ -134,11 +140,35 @@ class StreamReceiver:
 
         # Visitor logging database
         self._init_visitor_db()
+        self.restore_restart_snapshot()
         
         self.log.info(f"StreamReceiver initialized: {stream_addr}:{stream_port}")
         if self.start_webshow:
             self.log.info("Web server enabled")
     
+    def restore_restart_snapshot(self):
+        """Consume an optional deployment handoff to preserve the live time window."""
+        path = os.path.join(self.plot_dir, 'restart-snapshot.npz')
+        if not os.path.exists(path):
+            return
+        try:
+            with np.load(path, allow_pickle=False) as saved:
+                intensity, circular, times = saved['I'], saved['V'], saved['timestamps']
+                count = len(times)
+                if (intensity.shape != (count, 768) or circular.shape != intensity.shape
+                        or count < 1 or count > self.buffer_length or not np.isfinite(times).all()
+                        or np.any(np.diff(times) < 0) or abs(time.time() - times[-1]) > 300):
+                    raise ValueError('Invalid or stale restart snapshot')
+                self.ring_buffer[:count] = intensity
+                self.ring_buffer_v[:count] = circular
+                self.ring_arr_mjd[:count, 0] = times / 86400.0 + 40587.0
+                self.buffer_index = count % self.buffer_length
+                self.frames_received = count
+            os.replace(path, os.path.join(self.plot_dir, 'restart-snapshot.used.npz'))
+            self.log.info(f'Restored {count} timestamped source frames for deployment')
+        except Exception as exc:
+            self.log.warning(f'Restart snapshot skipped: {exc}')
+
     def setup_logging(self):
         """Setup logging configuration"""
         self.log = logging.getLogger(__name__)
@@ -151,31 +181,16 @@ class StreamReceiver:
             self.log.setLevel(logging.INFO)
     
 
-    def save_latest_data_to_jpg(self, norm_factor=1e4*24, out_size=(640,640)):
-        """
-        Save the latest data to a jpg image.
-        Parameters
-        ----------
-        norm_factor : float, optional
-            Normalization factor for the data. Default is 1e4*24.
-        out_size: tuple, optional
-            Output size for the image. Default is (320,320).
-        Returns
-        -------
-        str: Path to the saved image
-        """
-
-        latest_data = self.get_latest_data(n_frames=self.buffer_length)[0]
-        # latest_data = np.flip(latest_data, axis=1)
-        # use scikit-image to resize the image
-        
+    def save_latest_data_to_jpg(self, norm_factor=1e4*24, out_size=(640, 640),
+                                snapshot=None, filename='latest_data.jpg'):
+        """Render one immutable source-time snapshot in the model's orientation."""
         from skimage.transform import resize
-        data_out = resize(latest_data, out_size, anti_aliasing=True)
-
-        paint_arr_to_jpg(data_out/norm_factor, filename=f'{self.plot_dir}/latest_data.jpg', vmax=200, vmin=0.5, scaling='log')
-        #self.log.info(f"Latest data saved to {self.plot_dir}/latest_data.jpg")
-
-        return f'{self.plot_dir}/latest_data.jpg'
+        metadata, intensity, _, timestamps = snapshot or self._get_spectrum_arrays()
+        raster, _, _ = time_raster(intensity, timestamps, metadata.get('previous_timestamp'))
+        data_out = resize(raster, out_size, anti_aliasing=True)
+        path = os.path.join(self.plot_dir, filename)
+        paint_arr_to_jpg(data_out / norm_factor, filename=path, vmax=200, vmin=0.5, scaling='log')
+        return path
 
 
     def save_latest_data_to_npz(self, norm_factor=1e4*24, save_dir='./figs/',
@@ -287,7 +302,7 @@ class StreamReceiver:
     def run_ai_summary(self):
         """Generate an AI summary of the latest spectrum using Gemini."""
         current_time = time.time()
-        if current_time - self.last_ai_summary_time < self.ai_summary_interval:
+        if current_time - self.last_ai_attempt < self.ai_summary_interval:
             return
 
         api_key = os.environ.get("GEMINI_API_KEY")
@@ -295,8 +310,12 @@ class StreamReceiver:
             # Silent if not configured
             return
 
+        snapshot = self._get_spectrum_arrays()
+        if not len(snapshot[3]):
+            return
+        self.last_ai_attempt = current_time
         try:
-            image_path = self.save_latest_data_to_jpg()
+            image_path = self.save_latest_data_to_jpg(snapshot=snapshot, filename="ai-input.jpg")
             if not os.path.exists(image_path):
                 self.log.warning(f"AI summary: image not found at {image_path}")
                 return
@@ -347,105 +366,64 @@ class StreamReceiver:
 
 
     def run_type3_detection(self):
-        """Run Type 3 radio burst detection using YOLO v8s model"""
+        """Cached inference on a timestamped snapshot, outside the ingest thread."""
         current_time = time.time()
-        
-        # Check if enough time has passed since last detection
-        if current_time - self.last_detection_time < self.detection_interval:
+        if current_time - self.last_detection_attempt < self.detection_interval:
             return
-        
-        
+        snapshot = self._get_spectrum_arrays()
+        metadata, intensity, _, timestamps = snapshot
+        if len(timestamps) < 2:
+            return
+        self.last_detection_attempt = current_time
         try:
-            # Import YOLO here to avoid import errors if not installed
-            from ultralytics import YOLO
-            
-            
-            # Load YOLO model
-            model_path = 'model/bestv8.iw.pt'
-            if not os.path.exists(model_path):
-                self.log.error(f"YOLO model not found at {model_path}")
-                return
-            
-            model = YOLO(model_path)
-            
-            # Save latest data as image for detection
-            image_path = self.save_latest_data_to_jpg()
-            
-            # Check if image file exists
-            if not os.path.exists(image_path):
-                self.log.error(f"Latest data image not found at {image_path}")
-                return
-            
-            # Run YOLO prediction on the image
-            results = model.predict(image_path, conf=0.6, iou=0.6, verbose=False)
-            
-            # Process detection results
+            if self.detection_model is None:
+                from ultralytics import YOLO
+                model_path = os.path.join(os.path.dirname(__file__), 'model', 'bestv8.iw.pt')
+                if not os.path.exists(model_path):
+                    self.log.error(f"YOLO model not found at {model_path}")
+                    return
+                self.detection_model = YOLO(model_path)
+            _, window_start, window_end = time_raster(
+                intensity, timestamps, metadata.get('previous_timestamp'))
+            image_path = self.save_latest_data_to_jpg(snapshot=snapshot, filename='detection-input.jpg')
+            results = self.detection_model.predict(
+                image_path, conf=self.detection_confidence, iou=0.6, verbose=False)
             detections = []
-            if results and len(results) > 0:
-
-                self.last_detection_time = current_time
-                result = results[0]  # Get first (and only) result
-                
-                if result.boxes is not None and len(result.boxes) > 0:
-                    boxes = result.boxes
-                    
+            if results:
+                result = results[0]
+                boxes = result.boxes
+                if boxes is not None:
                     for i in range(len(boxes)):
-                        # Get bounding box coordinates (xyxy format)
-                        box = boxes.xyxy[i].cpu().numpy()
-                        x1, y1, x2, y2 = box
-                        
-                        # Convert to normalized coordinates (x, y, width, height)
-                        img_height, img_width = 640, 640  # Image size from save_latest_data_to_jpg
-
-                        # flip y coordinate
-                        y1 = img_height - y1
-                        y2 = img_height - y2
-                        
-                        x = float(x1 / img_width)
-                        y = float(y1 / img_height)
-                        
-                        # flip y coordinate
-                        #y = 1 - y
-                        
-                        width = float((x2 - x1) / img_width)
-                        height = float((y2 - y1) / img_height)
-                        
-                        # Get class and confidence
+                        geometry = source_box(boxes.xyxy[i].cpu().numpy(), result.orig_shape,
+                                              window_start, window_end)
                         class_id = int(boxes.cls[i].cpu().numpy())
-                        confidence = float(boxes.conf[i].cpu().numpy())
-                        
-                        # Map class ID to class name (assuming 0=type3, 1=type3b)
-                        class_name = 'type3' if class_id == 0 else 'type3b'
-                        
-                        detection = {
-                            'id': i,
-                            'class_id': class_id,
-                            'class': class_name,
-                            'confidence': confidence,
-                            'bbox': [x, y, width, height],  # [x, y, width, height] normalized (all Python floats)
-                            'timestamp': current_time
-                        }
-                        detections.append(detection)
-            else:
-                self.log.info(f"No detections found in {image_path}")
-            
-            # Update latest detections with thread safety
+                        detections.append({
+                            'id': i, 'class_id': class_id,
+                            'class': 'type3' if class_id == 0 else 'type3b',
+                            'confidence': float(boxes.conf[i].cpu().numpy()),
+                            **geometry,
+                            'timestamp': float(timestamps[-1]),
+                            'boot_id': metadata['boot_id'],
+                            'frame_sequence': metadata['sequence'],
+                        })
             with self.detection_lock:
                 self.latest_detections = detections
-            
-            if self.verbose and len(detections) > 0:
-                self.log.info(f"Type 3 detection: {len(detections)} bursts detected")
-                for det in detections:
-                    self.log.info(f"  - {det['class']}: {det['confidence']:.3f} at {det['bbox']}")
-            
-        except ImportError as e:
-            self.log.error(f"YOLO dependencies not available: {e}")
-            self.log.info("Please install ultralytics: pip install ultralytics")
-        except Exception as e:
-            self.log.error(f"Error in Type 3 detection: {str(e)}")
-            import traceback
-            self.log.error(f"Traceback: {traceback.format_exc()}")
+                self.last_detection_time = time.time()
+                self.detection_window = {
+                    'window_start': window_start, 'window_end': window_end,
+                    'time_anchor': float(timestamps[-1]),
+                    'boot_id': metadata['boot_id'], 'frame_sequence': metadata['sequence'],
+                }
+        except Exception as exc:
+            self.log.error(f"Error in Type 3 detection: {exc}")
 
+    def analysis_loop(self, callback):
+        while not self.shutdown_event.is_set():
+            try:
+                callback()
+            except Exception as exc:
+                self.log.error(f"Analysis worker error: {exc}")
+            self.shutdown_event.wait(0.25)
 
     def run_type3_detection_dummy(self):
         """Run Type 3 radio burst detection (dummy implementation)"""
@@ -588,9 +566,6 @@ class StreamReceiver:
             if self.verbose:
                 self.log.debug(f"Processed frame: buffer_index={self.buffer_index}, delay={self.delay:.3f}s")
             
-            # Run Type 3 detection every 5 frames
-            if (self.buffer_index + 3) % 5 == 0:
-                self.run_type3_detection()
 
             # save all when buffer_index everytime when length-1
             if self.save_all_to_file and self.buffer_index == self.buffer_length - 1:
@@ -650,11 +625,6 @@ class StreamReceiver:
                 self.log.error(f"Error in receive loop: {str(e)}")
                 time.sleep(0.1)  # Wait a bit before retrying
 
-            # Periodically run AI summary (non-blocking throttle inside)
-            try:
-                self.run_ai_summary()
-            except Exception as e:
-                self.log.error(f"AI summary loop error: {e}")
         
         # Final garbage collection before stopping
         gc.collect()
@@ -671,6 +641,11 @@ class StreamReceiver:
         # Start receive thread
         self.receive_thread = threading.Thread(target=self.receive_loop, daemon=True)
         self.receive_thread.start()
+        self.analysis_threads = []
+        for callback in (self.run_type3_detection, self.run_ai_summary):
+            worker = threading.Thread(target=self.analysis_loop, args=(callback,), daemon=True)
+            worker.start()
+            self.analysis_threads.append(worker)
         
 
         # Start web server only if enabled
@@ -697,6 +672,9 @@ class StreamReceiver:
         if hasattr(self, 'receive_thread'):
             self.receive_thread.join(timeout=5.0)
         
+        for worker in getattr(self, "analysis_threads", []):
+            worker.join(timeout=1.0)
+
         # Close ZMQ resources
         if hasattr(self, 'socket'):
             self.socket.close()
@@ -820,38 +798,41 @@ class StreamReceiver:
                 raise ValueError(f"Invalid polarization: {pol}")
             return values, self.ring_arr_mjd[indices].copy()
 
-    def _get_spectrum_arrays(self, since=None, boot_id=None):
-        """Copy a matching I/V batch, including rows missed between browser polls.
-
-        Cursors belong to one receiver process. A restart or a cursor older than
-        the ring returns a full reset; an unchanged cursor returns no new rows.
-        Array copies happen under the ingest lock, serialization happens after it.
-        """
+    def _get_spectrum_arrays(self, since=None, boot_id=None, limit=None, before=None):
+        """Atomic paired samples; small recent snapshots and paged older history."""
         with self.buffer_lock:
             sequence = self.frames_received
             available = min(sequence, self.buffer_length)
-            reset = (since is None or boot_id != self.boot_id or since < 0
-                     or since > sequence or sequence - since > available)
-            count = available if reset else sequence - since
-            indices = (np.arange(self.buffer_index - count,
-                                 self.buffer_index) % self.buffer_length)
+            oldest = sequence - available + 1
+            limit = self.buffer_length if limit is None else min(self.buffer_length, max(1, limit))
+            history = before is not None and boot_id == self.boot_id
+            reset = not history and (since is None or boot_id != self.boot_id or since < 0
+                                     or since > sequence or sequence - since > available)
+            end = min(before, sequence) if history else sequence
+            count = max(0, min(limit, end - oldest + 1)) if history or reset else sequence - since
+            first = end - count + 1
+            indices = (np.arange(self.buffer_index - (sequence - end) - count,
+                                 self.buffer_index - (sequence - end)) % self.buffer_length)
             intensity = self.ring_buffer[indices].copy()
             circular = self.ring_buffer_v[indices].copy()
             times = self.ring_arr_mjd[indices, 0].copy()
+            previous = None
+            if count and first > oldest:
+                previous_index = (self.buffer_index - (sequence - first) - 2) % self.buffer_length
+                previous = float((self.ring_arr_mjd[previous_index, 0] - 40587.0) * 86400.0)
             index = self.buffer_index
+        has_more = bool(count and (history or reset) and first > oldest)
         metadata = {
-            'sequence': sequence,
-            'first_sequence': sequence - count + 1 if count else None,
-            'boot_id': self.boot_id,
-            'reset': reset,
-            'buffer_length': self.buffer_length,
-            'buffer_index': index,
-            'timestamp': time.time(),
+            'sequence': sequence, 'first_sequence': first if count else None,
+            'boot_id': self.boot_id, 'reset': reset, 'history': history,
+            'has_more': has_more, 'next_before': first - 1 if has_more else None,
+            'previous_timestamp': previous, 'buffer_length': self.buffer_length,
+            'buffer_index': index, 'timestamp': time.time(),
         }
         return metadata, intensity, circular, (times - 40587.0) * 86400.0
 
-    def get_spectrum_snapshot(self, since=None, boot_id=None):
-        metadata, intensity, circular, times = self._get_spectrum_arrays(since, boot_id)
+    def get_spectrum_snapshot(self, since=None, boot_id=None, limit=None, before=None):
+        metadata, intensity, circular, times = self._get_spectrum_arrays(since, boot_id, limit, before)
         # Corrupt/non-finite samples remain missing, rather than invalid JSON.
         def json_rows(values):
             if np.isfinite(values).all():
@@ -866,9 +847,9 @@ class StreamReceiver:
             **metadata,
         }
 
-    def get_spectrum_binary(self, since=None, boot_id=None):
+    def get_spectrum_binary(self, since=None, boot_id=None, limit=None, before=None):
         """Aligned header + float64 times + float32 I/V, without JSON array copies."""
-        metadata, intensity, circular, times = self._get_spectrum_arrays(since, boot_id)
+        metadata, intensity, circular, times = self._get_spectrum_arrays(since, boot_id, limit, before)
         metadata.update(schema='lwa-spectrum-iv-v1', rows=len(times), bins=768,
                         dtype='float32', byteorder='little', order=['I', 'V'])
         header = json.dumps(metadata, separators=(',', ':')).encode('utf-8')
@@ -891,7 +872,7 @@ class StreamReceiver:
             frontend_dist = os.path.join(base_dir, 'frontend', 'dist')
 
             app = FastAPI()
-            app.add_middleware(GZipMiddleware, minimum_size=1024)
+            app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=3)
 
             # CORS configuration similar to previous Flask+CORS
             app.add_middleware(
@@ -929,27 +910,32 @@ class StreamReceiver:
                 return JSONResponse([])
 
             @app.get("/spectrum")
-            async def get_spectrum(since: int = None, boot_id: str = None, format: str = 'json'):
+            def get_spectrum(since: int = None, boot_id: str = None, format: str = 'json',
+                             limit: int = Query(600, ge=1, le=600), before: int = Query(None, ge=0)):
+                if since is not None and before is not None:
+                    raise HTTPException(status_code=400, detail='Use since or before, not both')
                 headers = {'Cache-Control': 'no-store'}
                 if format == 'binary':
-                    return Response(self.get_spectrum_binary(since, boot_id),
+                    return Response(self.get_spectrum_binary(since, boot_id, limit, before),
                                     media_type='application/octet-stream', headers=headers)
                 if format != 'json':
                     raise HTTPException(status_code=400, detail='Unknown spectrum format')
-                return JSONResponse(self.get_spectrum_snapshot(since, boot_id), headers=headers)
+                return JSONResponse(self.get_spectrum_snapshot(since, boot_id, limit, before), headers=headers)
 
             @app.get("/type3detect")
             async def get_type3_detections():
                 with self.detection_lock:
                     detections = self.latest_detections.copy()
+                    window = self.detection_window.copy()
 
                 current_time = time.time()
                 response_data = {
                     "detections": detections,
                     "timestamp": current_time,
-                    "time_anchor": current_time,
+                    **window,
                     "count": len(detections),
                     "last_detection_time": self.last_detection_time,
+                    "confidence_threshold": self.detection_confidence,
                 }
                 return JSONResponse(response_data)
 

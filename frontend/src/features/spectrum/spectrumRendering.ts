@@ -33,6 +33,8 @@ export const COLOR_TABLES = {
 };
 
 export const V_FRACTION_LIMIT = 0.6;
+export const INTENSITY_MAX_SFU = 3000;
+const INTENSITY_LOG_MAX = Math.log10(INTENSITY_MAX_SFU);
 
 export function displayValue(value: number | null, polarization: Polarization, intensity: number | null = null) {
   if (value === null || !Number.isFinite(value)) return null;
@@ -45,7 +47,7 @@ export function colorIndex(value: number | null, polarization: Polarization) {
   if (value === null || !Number.isFinite(value)) return -1;
   if (polarization === 'I' && value <= 0) return -1;
   const scaled = polarization === 'I'
-    ? Math.log10(Math.max(1, Math.min(1e4, value))) / 4
+    ? Math.log10(Math.max(1, Math.min(INTENSITY_MAX_SFU, value))) / INTENSITY_LOG_MAX
     : 0.5 + 0.5 * value / V_FRACTION_LIMIT;
   return Math.round(Math.max(0, Math.min(1, scaled)) * 255);
 }
@@ -58,7 +60,7 @@ export function timeSlot(timestamp: number) {
 // cover two 0.5 s raster columns. Longer gaps remain unfilled.
 export function firstCoveredSlot(previous: number | null, current: number) {
   const slot = timeSlot(current);
-  return previous !== null && current - previous <= COLUMN_SECONDS * 1.5
+  return previous !== null && current >= previous && current - previous <= COLUMN_SECONDS * 1.5
     ? Math.min(slot, timeSlot(previous) + 1)
     : slot;
 }

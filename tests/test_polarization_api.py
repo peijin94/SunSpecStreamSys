@@ -6,11 +6,16 @@ import logging
 import struct
 import threading
 import unittest
+import tempfile
+import time
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import urlsplit
 
 import numpy as np
 from stream_receiver import StreamReceiver
+from spectrum_time import time_raster, source_box
 
 
 class PolarizationTests(unittest.TestCase):
@@ -78,6 +83,44 @@ class PolarizationTests(unittest.TestCase):
         self.frame(5)
         for since, boot in [(0, 'old-boot'), (100, 'test-boot'), (-1, 'test-boot')]:
             self.assertTrue(self.receiver.get_spectrum_snapshot(since, boot)['reset'])
+
+    def test_recent_tail_and_older_pages_are_contiguous_after_wrap(self):
+        for n in range(1, 9): self.frame(n, 1791406800 + n * .5)
+        tail = self.receiver.get_spectrum_snapshot(limit=2)
+        self.assertEqual([row[0] for row in tail['I']], [21, 24])
+        self.assertEqual(tail['first_sequence'], 7)
+        self.assertEqual(tail['next_before'], 6)
+        self.assertAlmostEqual(tail['previous_timestamp'], 1791406803, places=5)
+        older = self.receiver.get_spectrum_snapshot(boot_id='test-boot', limit=2, before=6)
+        self.assertTrue(older['history'])
+        self.assertFalse(older['reset'])
+        self.assertEqual([row[0] for row in older['I']], [15, 18])
+        self.assertFalse(older['has_more'])
+        self.assertEqual(older['sequence'], 8)
+        empty = self.receiver.get_spectrum_snapshot(boot_id='test-boot', limit=2, before=4)
+        self.assertEqual(empty['I'], [])
+        restarted = self.receiver.get_spectrum_snapshot(boot_id='old-boot', limit=2, before=6)
+        self.assertTrue(restarted['reset'])
+        self.assertFalse(restarted['history'])
+
+    def test_model_work_does_not_run_during_ingest(self):
+        self.receiver.run_type3_detection = lambda: self.fail('Inference ran in ingestion')
+        self.receiver.run_ai_summary = lambda: self.fail('AI ran in ingestion')
+        for n in range(8): self.frame(n)
+        self.assertEqual(self.receiver.frames_received, 8)
+
+    def test_restart_handoff_preserves_both_polarizations_and_source_times(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.receiver.plot_dir = directory
+            timestamps = np.array([time.time() - 1, time.time() - .5])
+            np.savez(Path(directory) / 'restart-snapshot.npz', I=np.full((2, 768), 60),
+                     V=np.full((2, 768), -20), timestamps=timestamps)
+            self.receiver.restore_restart_snapshot()
+            data = self.receiver.get_spectrum_snapshot()
+            self.assertEqual(data['I'][1][0], 60)
+            self.assertEqual(data['V'][1][0], -20)
+            np.testing.assert_allclose(data['timestamps'], timestamps, atol=1e-5, rtol=0)
+            self.assertTrue((Path(directory) / 'restart-snapshot.used.npz').exists())
 
     def test_binary_has_aligned_float_arrays_and_matches_json(self):
         self.frame(7)
@@ -154,6 +197,74 @@ class PolarizationTests(unittest.TestCase):
         self.assertEqual(len(json.loads(body)['data']), 2)
         self.assertEqual(self.request('/spectrum?since=bad')[0]['status'], 422)
         self.assertEqual(self.request('/spectrum?format=bad')[0]['status'], 400)
+        self.assertEqual(self.request('/spectrum?limit=0')[0]['status'], 422)
+        self.assertEqual(self.request('/spectrum?since=1&before=2')[0]['status'], 400)
+        start, body = self.request('/spectrum?limit=2')
+        self.assertEqual(len(json.loads(body)['I']), 2)
+
+
+class SourceGeometryTests(unittest.TestCase):
+    def test_detection_raster_uses_the_same_half_second_slots_and_real_gaps(self):
+        times = np.array([100.49, 101.0036, 102.0308])
+        raster, start, end = time_raster(np.array([[1], [2], [3]], dtype=np.float32), times)
+        self.assertEqual(end, 102.5)
+        self.assertEqual(end - start, 300)
+        self.assertEqual(raster[-5:, 0].tolist(), [1, 2, 2, 0, 3])
+
+    def test_image_box_has_absolute_source_times_and_positive_height(self):
+        geometry = source_box([64, 128, 128, 256], (640, 640), 1000, 1300)
+        np.testing.assert_allclose(geometry['bbox'], [.1, .6, .1, .2])
+        self.assertEqual(geometry['time_start'], 1030)
+        self.assertEqual(geometry['time_end'], 1060)
+
+    def test_inference_keeps_its_snapshot_when_new_frames_arrive(self):
+        fixture = PolarizationTests(); fixture.setUp()
+        fixture.frame(1, 1791406800); fixture.frame(2, 1791406800.5)
+        receiver = fixture.receiver
+        receiver.last_detection_attempt = 0
+        receiver.detection_interval = 5
+        receiver.detection_confidence = .55
+        receiver.detection_lock = threading.Lock()
+        class Tensor:
+            def __init__(self, value): self.value = np.asarray(value)
+            def cpu(self): return self
+            def numpy(self): return self.value
+        class Boxes:
+            xyxy = [Tensor([64, 128, 128, 256])]
+            cls = [Tensor(0)]
+            conf = [Tensor(.57)]
+            def __len__(self): return 1
+        class Model:
+            def predict(self, path, **options):
+                self.options = options
+                fixture.frame(3, 1791406801)
+                return [SimpleNamespace(boxes=Boxes(), orig_shape=(640, 640))]
+        receiver.detection_model = model = Model()
+        receiver.save_latest_data_to_jpg = lambda **kwargs: 'snapshot.jpg'
+        StreamReceiver.run_type3_detection(receiver)
+        detection = receiver.latest_detections[0]
+        self.assertEqual(model.options['conf'], .55)
+        self.assertEqual(detection['frame_sequence'], 2)
+        self.assertAlmostEqual(detection['timestamp'], 1791406800.5, places=5)
+        self.assertGreater(detection['bbox'][3], 0)
+        self.assertEqual(receiver.frames_received, 3)
+
+    def test_blocked_analysis_does_not_block_frame_publication(self):
+        fixture = PolarizationTests(); fixture.setUp()
+        receiver = fixture.receiver
+        receiver.shutdown_event = threading.Event()
+        entered = threading.Event(); release = threading.Event()
+        def work(): entered.set(); release.wait(3)
+        worker = threading.Thread(target=receiver.analysis_loop, args=(work,))
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(2))
+            fixture.frame(5)
+            self.assertEqual(receiver.frames_received, 1)
+            self.assertFalse(release.is_set())
+        finally:
+            receiver.shutdown_event.set(); release.set(); worker.join(3)
+        self.assertFalse(worker.is_alive())
 
 
 if __name__ == '__main__': unittest.main()

@@ -1,13 +1,13 @@
 import * as React from 'react';
-import type { Detection, PolarizedFrame } from '../../api/client';
+import type { Detection } from '../../api/client';
+import { subscribeSpectrum } from './spectrumRenderer';
+import { detectionGeometry } from './detectionGeometry';
 import {
-  COLOR_TABLES, colorIndex, displayValue, timeSlot, firstCoveredSlot,
-  FREQUENCY_BINS, TIME_COLUMNS, TIME_WINDOW_SECONDS,
+  FREQUENCY_BINS, TIME_COLUMNS, TIME_WINDOW_SECONDS, COLUMN_SECONDS,
   type Polarization,
 } from './spectrumRendering';
 
 export interface SpectrumCanvasHandle {
-  updateFrames: (frames: PolarizedFrame[], timestamps: number[], reset: boolean, intensityFrames?: PolarizedFrame[]) => void;
   setDetections: (detections: Detection[]) => void;
 }
 
@@ -38,51 +38,14 @@ function createEngine(canvas: HTMLCanvasElement, polarization: Polarization): En
   texture.width = TIME_COLUMNS;
   texture.height = FREQUENCY_BINS;
   const textureContext = texture.getContext('2d', { alpha: false })!;
-  const image = textureContext.createImageData(TIME_COLUMNS, FREQUENCY_BINS);
-  const colors = COLOR_TABLES[polarization];
-  const dirtyColumns = new Set<number>();
-  let fullUpload = true;
   let latestSlot: number | null = null;
-  let latestTimestamp: number | null = null;
+  let bootId = '';
   let detections: Detection[] = [];
   let disposed = false;
   const columnFor = (slot: number) => ((slot % TIME_COLUMNS) + TIME_COLUMNS) % TIME_COLUMNS;
 
-  function clearColumn(column: number) {
-    for (let y = 0; y < FREQUENCY_BINS; y += 1) {
-      const offset = (y * TIME_COLUMNS + column) * 4;
-      image.data[offset] = 0;
-      image.data[offset + 1] = 0;
-      image.data[offset + 2] = 0;
-      image.data[offset + 3] = 255;
-    }
-    dirtyColumns.add(column);
-  }
-
-  function flushTexture() {
-    if (fullUpload || dirtyColumns.size > TIME_COLUMNS / 2) {
-      textureContext.putImageData(image, 0, 0);
-    } else {
-      // Upload adjacent columns together; a wrapped batch needs two short spans.
-      const columns = Array.from(dirtyColumns).sort((a, b) => a - b);
-      for (let i = 0; i < columns.length;) {
-        const first = columns[i];
-        let last = first;
-        while (i + 1 < columns.length && columns[i + 1] === last + 1) {
-          i += 1;
-          last = columns[i];
-        }
-        textureContext.putImageData(image, 0, 0, first, 0, last - first + 1, FREQUENCY_BINS);
-        i += 1;
-      }
-    }
-    dirtyColumns.clear();
-    fullUpload = false;
-  }
-
   function paint() {
     if (disposed) return;
-    flushTexture();
     const rect = canvas.getBoundingClientRect();
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const width = Math.max(1, Math.round(rect.width * dpr));
@@ -128,26 +91,30 @@ function createEngine(canvas: HTMLCanvasElement, polarization: Polarization): En
     ctx.fillText('Frequency (MHz)', 0, 0);
     ctx.restore();
 
-    for (let tick = 0; tick <= 4; tick += 1) {
-      const x = left + plotWidth * tick / 4;
-      ctx.textAlign = tick === 0 ? 'left' : tick === 4 ? 'right' : 'center';
-      ctx.fillText(tick === 4 ? 'Latest' : `−${TIME_WINDOW_SECONDS * (1 - tick / 4)}s`, x, h - 13);
+    const tickCount = plotWidth < 480 ? 2 : 4;
+    const displayEnd = latestSlot === null ? null : (latestSlot + 1) * COLUMN_SECONDS;
+    for (let tick = 0; tick <= tickCount; tick += 1) {
+      const x = left + plotWidth * tick / tickCount;
+      const ago = TIME_WINDOW_SECONDS * (1 - tick / tickCount);
+      const label = displayEnd === null ? `−${ago}s`
+        : new Date((displayEnd - ago) * 1000).toISOString().slice(11, 19) + (tick === tickCount ? ' UTC' : '');
+      ctx.textAlign = tick === 0 ? 'left' : tick === tickCount ? 'right' : 'center';
+      ctx.fillText(label, x, h - 13);
       ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + plotHeight); ctx.stroke();
     }
 
-    if (polarization === 'I' && latestTimestamp !== null) {
+    if (polarization === 'I' && displayEnd !== null) {
       ctx.save();
       ctx.beginPath(); ctx.rect(left, top, plotWidth, plotHeight); ctx.clip();
       for (const detection of detections) {
-        const age = latestTimestamp - detection.timestamp;
-        if (age > TIME_WINDOW_SECONDS) continue;
-        const [x, y, boxWidth, boxHeight] = detection.bbox;
-        const boxX = left + (x - age / TIME_WINDOW_SECONDS) * plotWidth;
-        const boxY = top + y * plotHeight;
+        const geometry = detectionGeometry(detection, displayEnd, bootId);
+        if (!geometry) continue;
+        const boxX = left + geometry.x * plotWidth;
+        const boxY = top + geometry.y * plotHeight;
         ctx.strokeStyle = detection.class_id === 0 ? '#f87171' : '#f8fafc';
         ctx.fillStyle = ctx.strokeStyle;
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(boxX, boxY, boxWidth * plotWidth, boxHeight * plotHeight);
+        ctx.strokeRect(boxX, boxY, geometry.width * plotWidth, geometry.height * plotHeight);
         ctx.textAlign = 'left';
         ctx.fillText(`${detection.class} ${Math.round(detection.confidence * 100)}%`, boxX + 3, Math.max(top + 12, boxY - 4));
       }
@@ -155,48 +122,23 @@ function createEngine(canvas: HTMLCanvasElement, polarization: Polarization): En
     }
   }
 
+  const unsubscribe = subscribeSpectrum((update) => {
+    if (disposed) return;
+    if (update.reset) {
+      textureContext.fillStyle = '#000';
+      textureContext.fillRect(0, 0, TIME_COLUMNS, FREQUENCY_BINS);
+    }
+    for (const span of update[polarization]) {
+      textureContext.putImageData(new ImageData(span.pixels, span.width, FREQUENCY_BINS), span.left, 0);
+    }
+    latestSlot = update.latestSlot;
+    bootId = update.bootId;
+    if (update.reset || update[polarization].length) requestPaint(paint);
+  });
   const observer = new ResizeObserver(() => requestPaint(paint));
   observer.observe(canvas);
   requestPaint(paint);
-
   return {
-    updateFrames(frames, timestamps, reset, intensityFrames) {
-      if (reset) {
-        image.data.fill(0);
-        latestSlot = null;
-        latestTimestamp = null;
-        fullUpload = true;
-      }
-      frames.forEach((frame, index) => {
-        if (frame.length !== FREQUENCY_BINS || !Number.isFinite(timestamps[index])) return;
-        const slot = timeSlot(timestamps[index]);
-        if (latestSlot !== null && slot < latestSlot) return;
-        const firstCovered = firstCoveredSlot(latestTimestamp, timestamps[index]);
-        if (latestSlot !== null && slot - latestSlot >= TIME_COLUMNS) {
-          image.data.fill(0);
-          fullUpload = true;
-        } else if (latestSlot !== null) {
-          // Preserve true elapsed time: missing integrations stay black.
-          for (let gap = latestSlot + 1; gap < firstCovered; gap += 1) clearColumn(columnFor(gap));
-        }
-        for (let covered = firstCovered; covered <= slot; covered += 1) {
-          const column = columnFor(covered);
-          for (let channel = 0; channel < FREQUENCY_BINS; channel += 1) {
-            const value = displayValue(frame[channel], polarization, intensityFrames?.[index]?.[channel] ?? null);
-            const color = colorIndex(value, polarization);
-            const offset = ((FREQUENCY_BINS - channel - 1) * TIME_COLUMNS + column) * 4;
-            image.data[offset] = color < 0 ? 0 : colors[color * 4];
-            image.data[offset + 1] = color < 0 ? 0 : colors[color * 4 + 1];
-            image.data[offset + 2] = color < 0 ? 0 : colors[color * 4 + 2];
-            image.data[offset + 3] = 255;
-          }
-          dirtyColumns.add(column);
-        }
-        latestSlot = slot;
-        latestTimestamp = timestamps[index];
-      });
-      if (reset || frames.length) requestPaint(paint);
-    },
     setDetections(next) {
       if (JSON.stringify(next) === JSON.stringify(detections)) return;
       detections = next.slice();
@@ -204,6 +146,7 @@ function createEngine(canvas: HTMLCanvasElement, polarization: Polarization): En
     },
     dispose() {
       disposed = true;
+      unsubscribe();
       observer.disconnect();
       dirtyPanels.delete(paint);
     },
@@ -221,7 +164,6 @@ export const SpectrumCanvas = React.forwardRef<SpectrumCanvasHandle, SpectrumCan
       return () => { engine.dispose(); engineRef.current = null; };
     }, [polarization]);
     React.useImperativeHandle(ref, () => ({
-      updateFrames: (frames, times, reset, intensity) => engineRef.current?.updateFrames(frames, times, reset, intensity),
       setDetections: (detections) => engineRef.current?.setDetections(detections),
     }), []);
     return (

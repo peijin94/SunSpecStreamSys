@@ -19,19 +19,25 @@ visitor counts. Spectrum history in the browser is a five-minute window.
 
 The frontend displays aligned Stokes I and V/I panels. I is converted from Jy
 to s.f.u. as `I / 1e4` and uses the exact 256-entry Viridis color map with a
-logarithmic scale from 1 to 10⁴ s.f.u. V/I divides each raw V value by raw I
+logarithmic scale from 1 to 3×10³ s.f.u. V/I divides each raw V value by raw I
 from the same integration and frequency bin. Its linear color scale spans
 −0.6 to +0.6: blue is negative, white is zero, red is positive. Values outside
 the display ranges are clipped. Missing samples, nonpositive I, and invalid
 ratios are black. Both panels retain the existing 15–85 MHz display labels.
-Detection overlays remain on I. APIs and NPZ archives retain the original
-I and V arrays; conversion and normalization happen only during rendering.
+Detection overlays remain on I. The paired spectrum API retains raw I and V
+in Jy. Existing NPZ archive normalization (`1e4 * 24`) is preserved.
 
 `GET /spectrum` returns paired `I`, `V`, and `timestamps` arrays with
 `sequence`, `first_sequence`, `boot_id`, and `reset`. Pass `since=<sequence>`
 and `boot_id=<boot_id>` to receive all new integrations since the previous
 request. An unchanged cursor returns empty arrays. A restart or expired cursor
-returns a full reset. `/data` and `/refresh` retain their existing I-only schemas.
+returns a reset. `limit=64` requests a short recent snapshot. Its `has_more`
+and `next_before` fields allow older pages to be fetched using
+`before=<next_before>&boot_id=<boot_id>&limit=64`. History pages report the
+current receiver sequence and their own `first_sequence`; they must not advance
+the browser's live cursor. `previous_timestamp` preserves integration coverage
+at page boundaries. The default limit remains 600 for existing clients.
+`/data` and `/refresh` retain their existing I-only schemas.
 Under Apache these endpoints are prefixed with `/live/`.
 
 The browser uses `/spectrum?format=binary`. The `lwa-spectrum-iv-v1` format is
@@ -40,12 +46,29 @@ to eight bytes, float64 Unix timestamps, float32 I rows, then float32 V rows.
 Header fields include `rows`, `bins`, `dtype`, `byteorder`, and `order`.
 Responses support gzip and use `Cache-Control: no-store`.
 
-Rendering uses reusable offscreen textures, color lookup tables, and updates
-only the affected time columns. One animation callback paints both panels when
+Rendering uses one shared Web Worker for both panel rasters, color lookup tables,
+and transfers only changed pixel spans to reusable Canvas textures. The first
+request contains 64 recent frames; older history loads in small pages while
+incremental live requests continue. One animation callback paints both panels when
 data or size changes; idle spectra do not redraw. Polls never overlap, pause
 for hidden tabs, and catch up when the tab becomes visible. Half-second raster
 columns cover normal approximately 0.514-second integrations; longer gaps
-remain black. Refresh reloads both histories together.
+remain black. Refresh retains the displayed history and existing cursor, and
+fetches only new frames. The time axis shows source UTC rather than wall-clock
+arrival time. A deployment can hand off raw I/V and Unix timestamps in
+`<plot_dir>/restart-snapshot.npz`; the receiver validates freshness and consumes
+it once, preserving the live window across the restart.
+
+Type III detection uses a cached YOLO model with confidence threshold 0.55
+(previously 0.60), retaining IoU 0.60 and a five-second inference interval.
+Detection and the sixty-second AI summary each run in their own worker thread
+so inference and external API calls do not block ZeroMQ ingestion. Their JPEGs
+use separate paths. The detector's input uses the same half-second source-time
+grid as the browser; boxes include absolute Unix `time_start`, `time_end`,
+source `timestamp`, `frame_sequence`, and `boot_id`. Frequency coordinates
+convert the model image's orientation to the display's with positive heights.
+The browser polls detections every two seconds and places boxes by absolute
+source UTC, so inference or download delays do not shift them.
 
 Validate changes with the receiver's Python environment and Node 20:
 

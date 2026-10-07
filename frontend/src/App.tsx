@@ -1,6 +1,7 @@
 import './App.css';
 import { SpectrumCanvas } from './features/spectrum/SpectrumCanvas';
 import { useSpectrumPolling } from './features/spectrum/useSpectrum';
+import { submitSpectrumBatch } from './features/spectrum/spectrumRenderer';
 import { useDetectionsPolling } from './features/detections/useDetections';
 import { Button } from './components/ui/button';
 import {
@@ -20,11 +21,9 @@ import {
 import { Gemini } from '@lobehub/icons';
 
 function App() {
-  const spectrum = useSpectrumPolling();
+  const spectrum = useSpectrumPolling(submitSpectrumBatch);
   const detections = useDetectionsPolling();
   const intensityRef =
-    React.useRef<SpectrumCanvasHandle | null>(null);
-  const circularRef =
     React.useRef<SpectrumCanvasHandle | null>(null);
   const [aiSummary, setAiSummary] = React.useState('');
   const [aiSummaryTime, setAiSummaryTime] =
@@ -35,13 +34,6 @@ function App() {
     React.useState<number | null>(null);
   const [sunEph, setSunEph] =
     React.useState<SunEphemeris | null>(null);
-
-  React.useEffect(() => {
-    if (!spectrum.batch) return;
-    const { I, V, timestamps, reset } = spectrum.batch;
-    intensityRef.current?.updateFrames(I, timestamps, reset);
-    circularRef.current?.updateFrames(V, timestamps, reset, I);
-  }, [spectrum.batch]);
 
   React.useEffect(() => {
     intensityRef.current?.setDetections(
@@ -159,7 +151,7 @@ function App() {
               <div className="flex items-center gap-2 text-[11px] text-slate-400">
                 <span>1</span>
                 <span className="h-2 w-24 rounded-full" style={{ background: 'linear-gradient(to right, #440154, #3b528b, #21918c, #5ec962, #fde725)' }} />
-                <span>10⁴</span><span>Log · s.f.u.</span>
+                <span>3×10³</span><span>Log · s.f.u.</span>
               </div>
             </div>
             <SpectrumCanvas ref={intensityRef} polarization="I" className="h-[230px] w-full sm:h-[280px]" />
@@ -173,9 +165,11 @@ function App() {
                 <span>+0.6</span><span>Linear · V / I</span>
               </div>
             </div>
-            <SpectrumCanvas ref={circularRef} polarization="V" className="h-[230px] w-full sm:h-[280px]" />
+            <SpectrumCanvas polarization="V" className="h-[230px] w-full sm:h-[280px]" />
           </section>
         </section>
+
+        {spectrum.historyLoading && <p role="status" className="text-xs text-slate-400">Loading earlier history… live data continues updating.</p>}
 
         <section className="grid gap-6 md:grid-cols-3">
           <Card className="bg-slate-900/80 border-slate-800">
@@ -283,7 +277,7 @@ function App() {
                   onClick={spectrum.refresh}
                   variant="outline"
                 >
-                  Refresh I / V
+                  {spectrum.refreshing ? 'Updating…' : 'Refresh I / V'}
                 </Button>
               </div>
             </CardContent>

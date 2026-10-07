@@ -1,3 +1,5 @@
+import type { Detection } from './detectionProtocol';
+export type { Detection } from './detectionProtocol';
 import { decodeSpectrum, type SpectrumBatch, type SpectrumCursor } from './spectrumProtocol';
 export type { PolarizedFrame, SpectrumBatch, SpectrumCursor } from './spectrumProtocol';
 
@@ -17,8 +19,8 @@ function buildUrl(path: string): string {
   return `${base}${p.startsWith('/') ? p : `/${p}`}`;
 }
 
-export async function fetchJson<T>(path: string): Promise<T> {
-  const res = await fetch(buildUrl(path));
+export async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(buildUrl(path), { signal });
   if (!res.ok) {
     throw new Error(`Request failed: ${res.status} ${res.statusText}`);
   }
@@ -40,10 +42,16 @@ export async function fetchSpectrum(
   signal?: AbortSignal,
 ): Promise<SpectrumBatch> {
   const query = cursor
-    ? `?format=binary&since=${cursor.sequence}&boot_id=${encodeURIComponent(cursor.boot_id)}`
-    : '?format=binary';
+    ? `?format=binary&limit=64&since=${cursor.sequence}&boot_id=${encodeURIComponent(cursor.boot_id)}`
+    : '?format=binary&limit=64';
   const res = await fetch(buildUrl(`/spectrum${query}`), { signal });
   if (!res.ok) throw new Error(`Spectrum request failed: ${res.status}`);
+  return decodeSpectrum(await res.arrayBuffer());
+}
+
+export async function fetchSpectrumHistory(bootId: string, before: number, signal?: AbortSignal): Promise<SpectrumBatch> {
+  const res = await fetch(buildUrl(`/spectrum?format=binary&limit=64&before=${before}&boot_id=${encodeURIComponent(bootId)}`), { signal });
+  if (!res.ok) throw new Error(`History request failed: ${res.status}`);
   return decodeSpectrum(await res.arrayBuffer());
 }
 
@@ -51,15 +59,6 @@ export interface RefreshResponse {
   data: SpectrumFrame[];
   buffer_length: number;
   buffer_index: number;
-  timestamp: number;
-}
-
-export interface Detection {
-  id: number;
-  class_id: number;
-  class: string;
-  confidence: number;
-  bbox: [number, number, number, number];
   timestamp: number;
 }
 
@@ -97,8 +96,8 @@ export function refreshSpectrum() {
   return fetchJson<RefreshResponse>('/refresh');
 }
 
-export function fetchDetections() {
-  return fetchJson<DetectionResponse>('/type3detect');
+export function fetchDetections(signal?: AbortSignal) {
+  return fetchJson<DetectionResponse>('/type3detect', signal);
 }
 
 export function fetchAiSummary() {

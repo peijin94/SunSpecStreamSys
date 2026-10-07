@@ -11,6 +11,10 @@ export interface SpectrumBatch {
   buffer_length: number;
   buffer_index: number;
   timestamp: number;
+  history?: boolean;
+  has_more?: boolean;
+  next_before?: number | null;
+  previous_timestamp?: number | null;
 }
 
 export interface SpectrumCursor {
@@ -44,4 +48,3 @@ export function decodeSpectrum(buffer: ArrayBuffer): SpectrumBatch {
     timestamps: Array.from(times),
   };
 }
-

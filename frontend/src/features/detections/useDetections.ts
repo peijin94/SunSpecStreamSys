@@ -12,7 +12,7 @@ interface UseDetectionsResult {
 }
 
 export function useDetectionsPolling(
-  intervalMs = 8000,
+  intervalMs = 2000,
 ): UseDetectionsResult {
   const [detections, setDetections] = React.useState<
     Detection[]
@@ -23,12 +23,16 @@ export function useDetectionsPolling(
     React.useState(0);
 
   React.useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false;
 
     async function tick() {
+      if (controller.signal.aborted || document.hidden || inFlight) return;
+      inFlight = true;
       try {
-        const data = await fetchDetections();
-        if (cancelled) return;
+        const data = await fetchDetections(controller.signal);
+        if (controller.signal.aborted) return;
         const newDetections = data.detections ?? [];
         setDetections(newDetections);
         const type3 = newDetections.filter(
@@ -40,15 +44,23 @@ export function useDetectionsPolling(
         setCurrentType3(type3);
         setCurrentType3b(type3b);
       } catch {
-        // ignore errors for now
+        // Keep the last valid source-anchored detections.
+      } finally {
+        inFlight = false;
+        if (!controller.signal.aborted) timer = setTimeout(tick, intervalMs);
       }
     }
 
-    tick();
-    const id = window.setInterval(tick, intervalMs);
+    function onVisibilityChange() {
+      if (timer) clearTimeout(timer);
+      if (!document.hidden) void tick();
+    }
+    void tick();
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      cancelled = true;
-      window.clearInterval(id);
+      controller.abort();
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [intervalMs]);
 
@@ -59,4 +71,3 @@ export function useDetectionsPolling(
     currentType3b,
   };
 }
-
