@@ -1,13 +1,13 @@
 import * as React from 'react';
 import type { Detection, PolarizedFrame } from '../../api/client';
 import {
-  COLOR_TABLES, colorIndex, timeSlot, firstCoveredSlot,
+  COLOR_TABLES, colorIndex, displayValue, timeSlot, firstCoveredSlot,
   FREQUENCY_BINS, TIME_COLUMNS, TIME_WINDOW_SECONDS,
   type Polarization,
 } from './spectrumRendering';
 
 export interface SpectrumCanvasHandle {
-  updateFrames: (frames: PolarizedFrame[], timestamps: number[], reset: boolean) => void;
+  updateFrames: (frames: PolarizedFrame[], timestamps: number[], reset: boolean, intensityFrames?: PolarizedFrame[]) => void;
   setDetections: (detections: Detection[]) => void;
 }
 
@@ -160,7 +160,7 @@ function createEngine(canvas: HTMLCanvasElement, polarization: Polarization): En
   requestPaint(paint);
 
   return {
-    updateFrames(frames, timestamps, reset) {
+    updateFrames(frames, timestamps, reset, intensityFrames) {
       if (reset) {
         image.data.fill(0);
         latestSlot = null;
@@ -182,7 +182,8 @@ function createEngine(canvas: HTMLCanvasElement, polarization: Polarization): En
         for (let covered = firstCovered; covered <= slot; covered += 1) {
           const column = columnFor(covered);
           for (let channel = 0; channel < FREQUENCY_BINS; channel += 1) {
-            const color = colorIndex(frame[channel], polarization);
+            const value = displayValue(frame[channel], polarization, intensityFrames?.[index]?.[channel] ?? null);
+            const color = colorIndex(value, polarization);
             const offset = ((FREQUENCY_BINS - channel - 1) * TIME_COLUMNS + column) * 4;
             image.data[offset] = color < 0 ? 0 : colors[color * 4];
             image.data[offset + 1] = color < 0 ? 0 : colors[color * 4 + 1];
@@ -220,12 +221,12 @@ export const SpectrumCanvas = React.forwardRef<SpectrumCanvasHandle, SpectrumCan
       return () => { engine.dispose(); engineRef.current = null; };
     }, [polarization]);
     React.useImperativeHandle(ref, () => ({
-      updateFrames: (frames, times, reset) => engineRef.current?.updateFrames(frames, times, reset),
+      updateFrames: (frames, times, reset, intensity) => engineRef.current?.updateFrames(frames, times, reset, intensity),
       setDetections: (detections) => engineRef.current?.setDetections(detections),
     }), []);
     return (
       <canvas ref={canvasRef} className={className} role="img"
-        aria-label={`Stokes ${polarization} spectrum: frequency against the last five minutes`} />
+        aria-label={`Stokes ${polarization === 'I' ? 'I in s.f.u.' : 'V / I fraction'} spectrum: frequency against the last five minutes`} />
     );
   },
 );

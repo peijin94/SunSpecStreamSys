@@ -1,3 +1,5 @@
+import { VIRIDIS } from './viridis.js';
+
 export type Polarization = 'I' | 'V';
 export const FREQUENCY_BINS = 768;
 export const TIME_COLUMNS = 600;
@@ -5,11 +7,6 @@ export const COLUMN_SECONDS = 0.5;
 export const TIME_WINDOW_SECONDS = TIME_COLUMNS * COLUMN_SECONDS;
 
 type ColorStop = readonly [number, number, number, number];
-const intensityStops: ColorStop[] = [
-  [0, 0, 0, 4], [0.125, 31, 12, 72], [0.25, 85, 15, 109],
-  [0.375, 136, 34, 106], [0.5, 187, 55, 84], [0.625, 227, 89, 51],
-  [0.75, 249, 140, 10], [0.875, 249, 201, 50], [1, 252, 255, 164],
-];
 const circularStops: ColorStop[] = [
   [0, 37, 99, 235], [0.5, 241, 245, 249], [1, 239, 68, 68],
 ];
@@ -31,17 +28,25 @@ function makeColorTable(stops: ColorStop[]) {
 }
 
 export const COLOR_TABLES = {
-  I: makeColorTable(intensityStops),
+  I: VIRIDIS,
   V: makeColorTable(circularStops),
 };
 
-const SIGNED_LOG_RANGE = Math.log1p(1e8 / 1e4);
+export const V_FRACTION_LIMIT = 0.6;
+
+export function displayValue(value: number | null, polarization: Polarization, intensity: number | null = null) {
+  if (value === null || !Number.isFinite(value)) return null;
+  if (polarization === 'I') return value > 0 ? value / 1e4 : null;
+  if (intensity === null || !Number.isFinite(intensity) || intensity <= 0) return null;
+  return value / intensity;
+}
 
 export function colorIndex(value: number | null, polarization: Polarization) {
   if (value === null || !Number.isFinite(value)) return -1;
+  if (polarization === 'I' && value <= 0) return -1;
   const scaled = polarization === 'I'
-    ? (Math.log10(Math.max(1e4, Math.min(1e8, value))) - 4) / 4
-    : 0.5 + 0.5 * Math.sign(value) * Math.log1p(Math.min(1e8, Math.abs(value)) / 1e4) / SIGNED_LOG_RANGE;
+    ? Math.log10(Math.max(1, Math.min(1e4, value))) / 4
+    : 0.5 + 0.5 * value / V_FRACTION_LIMIT;
   return Math.round(Math.max(0, Math.min(1, scaled)) * 255);
 }
 

@@ -17,11 +17,15 @@ Both polarizations and the source UTC timestamp are published under one lock.
 Spectra use a 600-frame memory ring and NPZ archives; SQLite `visitors.db` stores
 visitor counts. Spectrum history in the browser is a five-minute window.
 
-The frontend displays aligned Stokes I and V panels. I uses a logarithmic scale
-from 10⁴ to 10⁸ raw units. V uses a symmetric signed logarithmic scale from
-−10⁸ to +10⁸ with a 10⁴ transition scale: blue is negative, white is zero, red
-is positive. Missing samples are black. Both panels retain the existing
-15–85 MHz display labels. Detection overlays remain on I.
+The frontend displays aligned Stokes I and V/I panels. I is converted from Jy
+to s.f.u. as `I / 1e4` and uses the exact 256-entry Viridis color map with a
+logarithmic scale from 1 to 10⁴ s.f.u. V/I divides each raw V value by raw I
+from the same integration and frequency bin. Its linear color scale spans
+−0.6 to +0.6: blue is negative, white is zero, red is positive. Values outside
+the display ranges are clipped. Missing samples, nonpositive I, and invalid
+ratios are black. Both panels retain the existing 15–85 MHz display labels.
+Detection overlays remain on I. APIs and NPZ archives retain the original
+I and V arrays; conversion and normalization happen only during rendering.
 
 `GET /spectrum` returns paired `I`, `V`, and `timestamps` arrays with
 `sequence`, `first_sequence`, `boot_id`, and `reset`. Pass `since=<sequence>`
@@ -439,4 +443,3 @@ Operational notes:
 - The unit sets `MPLBACKEND=Agg`; the plotter must not need a display.
 - Output files are overwritten, so a restart mid-day re-plots the last complete
   chunk and continues; no state is persisted between runs.
-
