@@ -15,6 +15,7 @@ numpy>=1.19.0
 matplotlib>=3.3.0
 Pillow>=9.0.0            # util.py: `from PIL import Image` (otherwise pulled in by matplotlib)
 astropy>=4.0.0           # receiver, plot_npz.py, check_sun_elevation.py
+scipy>=1.7.0            # radio_images.py: resample fine-channel images in helioprojective WCS
 
 # --- Type 3 detection and live AI summary inside the receiver ---------------
 ultralytics>=8.0.0       # stream_receiver.py: YOLO v8s burst detection (lazy import)

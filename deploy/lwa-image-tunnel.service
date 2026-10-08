@@ -1,0 +1,18 @@
+[Unit]
+Description=OVRO-LWA fine-channel image API tunnel (calim12:8080 -> ovsa:18080)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Uses calim12 and its jump chain from peijin@ovsa's ~/.ssh/config.
+ExecStart=/usr/lib/autossh/autossh -M 0 -N -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o ConnectTimeout=20 -L 127.0.0.1:18080:127.0.0.1:8080 calim12
+Restart=always
+RestartSec=15
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=default.target

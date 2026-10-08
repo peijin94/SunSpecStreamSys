@@ -104,6 +104,33 @@ export function fetchAiSummary() {
   return fetchJson<AiSummaryResponse>('/ai-summary');
 }
 
+export interface RadioImage {
+  target_mhz: number;
+  freq_mhz: number;
+  date_obs: string;
+  unit: string;
+  image_url: string;
+}
+
+export interface RadioImagesResponse {
+  status: 'loading' | 'unavailable' | 'ready' | 'stale';
+  observation_time: string | null;
+  version: string | null;
+  checked_at: number | null;
+  fetched_at: number | null;
+  poll_interval_seconds: number;
+  message: string | null;
+  images: RadioImage[];
+}
+
+export function fetchRadioImages(signal?: AbortSignal) {
+  return fetchJson<RadioImagesResponse>('/radio-images', signal);
+}
+
+export function radioImageUrl(path: string) {
+  return buildUrl(path);
+}
+
 export function fetchVisitorCount() {
   return fetchJson<VisitorCountResponse>('/visitors/count');
 }

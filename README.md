@@ -83,6 +83,53 @@ npm run lint
 The older examples below describe historical plotting options; use the current
 receiver's `--help` for supported command-line flags.
 
+### Four-channel solar images
+
+The live page also shows fine-channel Stokes I images near **30, 45, 60, and
+75 MHz**. The backend polls the `lwasolarproc` image API every 60 seconds in a
+separate worker. It selects `/images?timestamp=newest`, then downloads all four
+NPZ planes at that observation timestamp. Response timestamp headers are checked
+so nearest-observation fallback cannot mix channels. Kelvin values convert to MK;
+spatial FITS WCS is resampled onto a common ±3000 arcsec solar field. The four
+PNGs share one brightness-temperature color scale, optical-limb overlay, and
+beam metadata where available.
+
+Raw planes and rendered PNGs stay in memory. A complete set is published
+atomically; the preceding complete set is retained for in-flight image requests.
+No image archive or database is added on ovsa. Repeated browser requests do not
+contact the upstream API. Unchanged observation timestamps skip image downloads
+and rendering. Failed refreshes retain the last valid complete set and mark it
+stale. With no first set, the panel shows waiting placeholders. The upstream API
+excludes observations older than ten minutes, so an empty window is expected
+when the imaging producer has no recent solar observation.
+
+`GET /radio-images` provides status, observation UTC, actual channel frequencies,
+version, check/fetch times, and image URLs. `GET /radio-images/{30|45|60|75}.png`
+serves cached PNG bytes, with `version=<version>` for a particular complete set.
+Versioned PNGs use ETags and immutable browser caching. Metadata uses no-store.
+Under Apache these routes are prefixed with `/live/`.
+
+The frontend polls metadata every 60 seconds and only downloads a changed set.
+It decodes all four images before replacing the display, retains the previous
+observation on partial failure, releases old blob URLs, and pauses image polls
+in hidden tabs. An image opens at full size when clicked.
+
+On ovsa, `LWA_IMAGE_API_URL` defaults to `http://127.0.0.1:18080`. The user unit
+`lwa-image-tunnel` forwards that loopback port through the configured `calim12`
+SSH alias to `ops`'s API at `127.0.0.1:8080` on calim12. The upstream user unit is
+`lwasolarproc-api`, running from `/fast/rtpipe/lwasolarproc`; its producer is
+`lwasunproc` with `--image-cache-db /fast/rtpipe/qa/images.db`.
+
+```bash
+install -m 0644 deploy/lwa-image-tunnel.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now lwa-image-tunnel
+python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+The SSH alias must authenticate without an interactive password or forwarded
+agent, since the tunnel is a user service.
+
 
 ## Components
 

@@ -3,6 +3,7 @@ import { SpectrumCanvas } from './features/spectrum/SpectrumCanvas';
 import { useSpectrumPolling } from './features/spectrum/useSpectrum';
 import { submitSpectrumBatch } from './features/spectrum/spectrumRenderer';
 import { useDetectionsPolling } from './features/detections/useDetections';
+import { RadioImagesPanel } from './features/images/RadioImagesPanel';
 import { Button } from './components/ui/button';
 import {
   Card,
@@ -170,6 +171,8 @@ function App() {
         </section>
 
         {spectrum.historyLoading && <p role="status" className="text-xs text-slate-400">Loading earlier history… live data continues updating.</p>}
+
+        <RadioImagesPanel />
 
         <section className="grid gap-6 md:grid-cols-3">
           <Card className="bg-slate-900/80 border-slate-800">

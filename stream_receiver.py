@@ -12,6 +12,7 @@ import sqlite3
 import uuid
 import struct
 from spectrum_time import time_raster, source_box
+from radio_images import RadioImageCache, FREQUENCIES as IMAGE_FREQUENCIES
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from astropy.time import Time
@@ -134,6 +135,8 @@ class StreamReceiver:
         self.last_ai_attempt = 0.0
         self.latest_ai_summary = ""
         self.ai_summary_lock = threading.Lock()
+        self.radio_images = RadioImageCache(
+            os.environ.get('LWA_IMAGE_API_URL', 'http://127.0.0.1:18080'))
         
         # Setup logging
         self.setup_logging()
@@ -646,6 +649,11 @@ class StreamReceiver:
             worker = threading.Thread(target=self.analysis_loop, args=(callback,), daemon=True)
             worker.start()
             self.analysis_threads.append(worker)
+        image_worker = threading.Thread(target=self.radio_images.run,
+                                        args=(self.shutdown_event,), daemon=True,
+                                        name='fine-channel-images')
+        image_worker.start()
+        self.analysis_threads.append(image_worker)
         
 
         # Start web server only if enabled
@@ -921,6 +929,25 @@ class StreamReceiver:
                 if format != 'json':
                     raise HTTPException(status_code=400, detail='Unknown spectrum format')
                 return JSONResponse(self.get_spectrum_snapshot(since, boot_id, limit, before), headers=headers)
+
+            @app.get('/radio-images')
+            def get_radio_images():
+                return JSONResponse(self.radio_images.metadata(), headers={'Cache-Control': 'no-store'})
+
+            @app.get('/radio-images/{target}.png')
+            def get_radio_image(target: int, request: Request, version: str = None):
+                if target not in IMAGE_FREQUENCIES:
+                    raise HTTPException(status_code=404, detail='Unknown image channel')
+                cached = self.radio_images.image(target, version)
+                if cached is None:
+                    raise HTTPException(status_code=404 if version else 503, detail='Image not available')
+                png, stamp, selected_version = cached
+                etag = f'"{selected_version}-{target}"'
+                headers = {'ETag': etag, 'X-Observation-Timestamp': stamp,
+                           'Cache-Control': 'public, max-age=86400, immutable' if version else 'no-store'}
+                if request.headers.get('if-none-match') == etag:
+                    return Response(status_code=304, headers=headers)
+                return Response(png, media_type='image/png', headers=headers)
 
             @app.get("/type3detect")
             async def get_type3_detections():

@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 import numpy as np
 from stream_receiver import StreamReceiver
 from spectrum_time import time_raster, source_box
+from radio_images import RadioImageCache
 
 
 class PolarizationTests(unittest.TestCase):
@@ -33,6 +34,7 @@ class PolarizationTests(unittest.TestCase):
         receiver.N_pol = 4
         receiver.verbose = False
         receiver.log = logging.getLogger('test-iv')
+        receiver.radio_images = RadioImageCache('http://127.0.0.1:18080')
         receiver.delay_method = 'manual'
         receiver.save_all_to_file = False
         receiver.run_type3_detection = lambda: None
