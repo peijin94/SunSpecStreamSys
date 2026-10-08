@@ -28,7 +28,7 @@ export function AntennaFlagsCard() {
   return (
     <Card aria-labelledby="antenna-flags-title" className="min-w-0 bg-slate-900/80 border-slate-800">
       <CardHeader>
-        <CardTitle id="antenna-flags-title">Antenna flagging</CardTitle>
+        <CardTitle id="antenna-flags-title">Flagging map</CardTitle>
         <p className="text-[11px] text-slate-400">Updates every minute</p>
       </CardHeader>
       <CardContent className="space-y-3 text-xs">

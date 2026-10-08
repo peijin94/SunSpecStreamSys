@@ -14,6 +14,7 @@ import struct
 from spectrum_time import time_raster, source_box
 from radio_images import RadioImageCache, FREQUENCIES as IMAGE_FREQUENCIES
 from antenna_flags import AntennaFlagCache
+from imaging_status import ImagingStatusCache
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from astropy.time import Time
@@ -140,6 +141,7 @@ class StreamReceiver:
             os.environ.get('LWA_IMAGE_API_URL', 'http://127.0.0.1:18080'))
         self.antenna_flags = AntennaFlagCache(os.environ.get(
             'LWA_QA_API_URL', os.environ.get('LWA_IMAGE_API_URL', 'http://127.0.0.1:18080')))
+        self.imaging_status = ImagingStatusCache(self.antenna_flags.base_url)
         
         # Setup logging
         self.setup_logging()
@@ -653,7 +655,8 @@ class StreamReceiver:
             worker.start()
             self.analysis_threads.append(worker)
         for cache, name in ((self.radio_images, 'fine-channel-images'),
-                            (self.antenna_flags, 'antenna-flags')):
+                            (self.antenna_flags, 'antenna-flags'),
+                            (self.imaging_status, 'imaging-status')):
             worker = threading.Thread(target=cache.run, args=(self.shutdown_event,),
                                       daemon=True, name=name)
             worker.start()
@@ -941,6 +944,10 @@ class StreamReceiver:
             @app.get('/antenna-flags')
             def get_antenna_flags():
                 return JSONResponse(self.antenna_flags.metadata(), headers={'Cache-Control': 'no-store'})
+
+            @app.get('/imaging-status')
+            def get_imaging_status():
+                return JSONResponse(self.imaging_status.metadata(), headers={'Cache-Control': 'no-store'})
 
             @app.get('/radio-images/{target}.png')
             def get_radio_image(target: int, request: Request, version: str = None):

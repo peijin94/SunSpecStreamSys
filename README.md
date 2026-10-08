@@ -141,7 +141,7 @@ agent, since the tunnel is a user service.
 
 ## Components
 
-### Antenna flagging card
+### Flagging map
 
 The live page includes an SVG antenna layout with north up and east/north axes
 in meters relative to LWA-000. The static template contains 352 antennas from
@@ -171,13 +171,37 @@ The default Any band view takes the union of all bands. A missing `ant_list`
 is unknown (gray), while an empty list is valid and shows green. The card also
 offers Full array/Core zoom, counts, point tooltips, and a visible observation
 timestamp. The lower row has four desktop cards, two tablet columns, and one
-mobile column. Cards use their natural heights.
+mobile column. Five cards fit one row at 1536 px and above. Cards use their natural heights.
 
 Regenerate the template only during development, with PyYAML available:
 
 ```bash
 python tools/generate_antenna_layout.py /path/to/lwa-antpos
 ```
+
+### Imaging status info
+
+The imaging QA card shows a per-band baseline flagging percentage and an
+A-team flux table for CasA, CygA, TauA, and VirA, with measured/expected Jy
+values and their ratio. The flagging percentage is the API's `flagged_frac`:
+flagged visibility samples across baselines. It is distinct from the number
+of fully flagged antennas on the map. The default band is nearest 60 MHz;
+the selector provides the other recorded bands. Missing measurements are —.
+
+`imaging_status.py` polls the same calim12 QA API every 60 seconds in a separate
+worker and serves `/imaging-status` (public `/live/imaging-status`) from memory.
+It first selects `/flagging?timestamp=newest`, then pins the flux request to
+that timestamp. Since historical queries select nearest, it verifies that
+the returned flux timestamp matches exactly; otherwise only baseline data
+is shown and A-team measurements are marked unavailable. Ratios are computed
+from measured/expected values, with a missing or zero expected value producing
+no ratio. Refresh failures retain the preceding complete observation.
+
+The frontend polls every minute, pauses while hidden, retains the preceding
+display on failure, and shows observation UTC and stale status. Sources without
+measurements are not treated as successful checks. Expected flux values include
+the pipeline's beam model; the upstream measurement omits sources below its
+30-degree elevation threshold.
 
 ### 1. AvgStreamingOp (in ovro_data_recorder/scripts/dr_beam.py)
 

@@ -1,5 +1,6 @@
 import type { Detection } from './detectionProtocol';
 import { parseAntennaFlags } from './antennaProtocol';
+import { parseImagingStatus } from './imagingProtocol';
 export type { Detection } from './detectionProtocol';
 import { decodeSpectrum, type SpectrumBatch, type SpectrumCursor } from './spectrumProtocol';
 export type { PolarizedFrame, SpectrumBatch, SpectrumCursor } from './spectrumProtocol';
@@ -130,6 +131,10 @@ export function fetchRadioImages(signal?: AbortSignal) {
 
 export async function fetchAntennaFlags(signal?: AbortSignal) {
   return parseAntennaFlags(await fetchJson<unknown>('/antenna-flags', signal));
+}
+
+export async function fetchImagingStatus(signal?: AbortSignal) {
+  return parseImagingStatus(await fetchJson<unknown>('/imaging-status', signal));
 }
 
 export function radioImageUrl(path: string) {
