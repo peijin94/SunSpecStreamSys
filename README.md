@@ -10,6 +10,14 @@ backend listens on loopback port 9527; Apache publishes it at
 `https://ovsa.njit.edu/live/`. The companion tunnel forwards `calim3:30005` to
 loopback port 30005. The frontend uses React, TypeScript, Vite, and Tailwind.
 
+The page uses the available screen width. At widths of 1024 pixels and above,
+the aligned I/V spectra occupy the left column and the four solar images form
+a two-by-two grid on the right; observation status, events, and AI cards sit
+below both columns. Smaller screens stack these panels. The header shows UTC
+and OVRO local time (America/Los_Angeles, including daylight saving time),
+updated every second, and Sun elevation from the existing OVSA ephemeris API,
+updated every minute. The clock updates independently of spectrum rendering.
+
 The ZeroMQ payload has shape `(1, 3072, 4)`, ordered as XX, YY, Re(XY), Im(XY).
 The receiver preserves its existing convention, `I = (XX + YY) / 2` and
 `V = Im(XY)`, then averages each group of four frequency channels into 768 bins.

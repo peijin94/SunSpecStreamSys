@@ -4,6 +4,7 @@ import { useSpectrumPolling } from './features/spectrum/useSpectrum';
 import { submitSpectrumBatch } from './features/spectrum/spectrumRenderer';
 import { useDetectionsPolling } from './features/detections/useDetections';
 import { RadioImagesPanel } from './features/images/RadioImagesPanel';
+import { ObservationInfo } from './components/ObservationInfo';
 import { Button } from './components/ui/button';
 import {
   Card,
@@ -126,10 +127,10 @@ function App() {
 
   return (
     <div className="min-h-screen bg-black text-slate-50">
-      <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-6">
-        <header className="flex items-baseline justify-between">
+      <main className="flex min-h-screen w-full flex-col gap-4 px-4 py-4 xl:px-6">
+        <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">
-            OVRO LWA Live Spectrum
+            OVRO LWA solar observation live
           </h1>
           <div className="text-xs text-slate-400">
             <span
@@ -145,36 +146,40 @@ function App() {
           </div>
         </header>
 
-        <section aria-label="Live Stokes I and V spectra" className="grid gap-4">
-          <section aria-labelledby="intensity-title" className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
-              <h2 id="intensity-title" className="text-sm font-semibold">Stokes I · Total intensity</h2>
-              <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                <span>1</span>
-                <span className="h-2 w-24 rounded-full" style={{ background: 'linear-gradient(to right, #440154, #3b528b, #21918c, #5ec962, #fde725)' }} />
-                <span>3×10³</span><span>Log · s.f.u.</span>
+        <ObservationInfo elevation={sunEph?.el ?? null} />
+
+        <section aria-label="Live spectra and solar images" className="live-monitor-grid">
+          <section aria-label="Live Stokes I and V spectra" className="live-spectrum-stack grid min-w-0 gap-4">
+            <section aria-labelledby="intensity-title" className="live-spectrum-panel overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
+                <h2 id="intensity-title" className="text-sm font-semibold">Stokes I · Total intensity</h2>
+                <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                  <span>1</span>
+                  <span className="h-2 w-24 rounded-full" style={{ background: 'linear-gradient(to right, #440154, #3b528b, #21918c, #5ec962, #fde725)' }} />
+                  <span>3×10³</span><span>Log · s.f.u.</span>
+                </div>
               </div>
-            </div>
-            <SpectrumCanvas ref={intensityRef} polarization="I" className="h-[230px] w-full sm:h-[280px]" />
-          </section>
-          <section aria-labelledby="circular-title" className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
-              <h2 id="circular-title" className="text-sm font-semibold">Stokes V / I · Circular polarization</h2>
-              <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                <span>−0.6</span>
-                <span className="relative h-2 w-24 rounded-full bg-gradient-to-r from-blue-600 via-slate-100 to-red-500" aria-label="Blue negative, white zero, red positive" />
-                <span>+0.6</span><span>Linear · V / I</span>
+              <SpectrumCanvas ref={intensityRef} polarization="I" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
+            </section>
+            <section aria-labelledby="circular-title" className="live-spectrum-panel overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
+                <h2 id="circular-title" className="text-sm font-semibold">Stokes V / I · Circular polarization</h2>
+                <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                  <span>−0.6</span>
+                  <span className="relative h-2 w-24 rounded-full bg-gradient-to-r from-blue-600 via-slate-100 to-red-500" aria-label="Blue negative, white zero, red positive" />
+                  <span>+0.6</span><span>Linear · V / I</span>
+                </div>
               </div>
-            </div>
-            <SpectrumCanvas polarization="V" className="h-[230px] w-full sm:h-[280px]" />
+              <SpectrumCanvas polarization="V" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
+            </section>
           </section>
+
+          <RadioImagesPanel />
         </section>
 
         {spectrum.historyLoading && <p role="status" className="text-xs text-slate-400">Loading earlier history… live data continues updating.</p>}
 
-        <RadioImagesPanel />
-
-        <section className="grid gap-6 md:grid-cols-3">
+        <section aria-label="Observation status, events, and AI summary" className="grid min-w-0 gap-4 md:grid-cols-3">
           <Card className="bg-slate-900/80 border-slate-800">
             <CardHeader>
               <CardTitle>Obs status and control</CardTitle>
