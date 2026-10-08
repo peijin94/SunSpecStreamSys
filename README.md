@@ -179,6 +179,10 @@ Regenerate the template only during development, with PyYAML available:
 python tools/generate_antenna_layout.py /path/to/lwa-antpos
 ```
 
+Solar images span ±6000 arcseconds on both helioprojective axes, centered on
+the Sun, with a shared MK scale and optical-limb circle. Image versions include
+the rendering profile so a field-of-view change replaces cached browser PNGs.
+
 ### Imaging status info
 
 The imaging QA card shows a per-band baseline flagging percentage and an

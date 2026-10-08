@@ -16,6 +16,8 @@ import numpy as np
 
 FREQUENCIES = (30, 45, 60, 75)
 POLL_SECONDS = 60
+SOLAR_EXTENT_ARCSEC = 6000
+RENDER_PROFILE = f'solar-hpc:{SOLAR_EXTENT_ARCSEC}:512:v2'.encode()
 
 
 @dataclass(frozen=True)
@@ -56,7 +58,7 @@ def read_plane(payload, expected):
     return ImagePlane(target, frequency, date_obs, image, header)
 
 
-def solar_view(plane, size=512, extent=3000):
+def solar_view(plane, size=512, extent=SOLAR_EXTENT_ARCSEC):
     """Resample helioprojective WCS onto a common solar arcsecond grid."""
     from astropy import units as u
     from astropy.wcs import WCS
@@ -95,19 +97,20 @@ def render_planes(planes):
         axes = figure.add_axes([.15, .13, .67, .80], facecolor='#020617')
         cmap = plt.get_cmap('inferno').copy()
         cmap.set_bad('#020617')
-        artist = axes.imshow(view, origin='lower', extent=(-3000, 3000, -3000, 3000),
+        extent = SOLAR_EXTENT_ARCSEC
+        artist = axes.imshow(view, origin='lower', extent=(-extent, extent, -extent, extent),
                              cmap=cmap, vmin=0, vmax=maximum, interpolation='nearest')
         radius = float(plane.header.get('RSUN_OBS', 959.63))
         axes.add_patch(Circle((0, 0), radius, fill=False, edgecolor='white',
                               linestyle='--', linewidth=.8, alpha=.7))
         if plane.header.get('BMAJ') and plane.header.get('BMIN'):
-            axes.add_patch(Ellipse((-2300, -2300), float(plane.header['BMIN']) * 3600,
+            axes.add_patch(Ellipse((-.77 * extent, -.77 * extent), float(plane.header['BMIN']) * 3600,
                                    float(plane.header['BMAJ']) * 3600,
                                    angle=-float(plane.header.get('BPA', 0)),
                                    facecolor='none', edgecolor='white', linewidth=.8))
         axes.set(xlabel='Solar X (arcsec)', ylabel='Solar Y (arcsec)',
-                 xlim=(-3000, 3000), ylim=(-3000, 3000))
-        axes.set_xticks([-2000, 0, 2000]); axes.set_yticks([-2000, 0, 2000])
+                 xlim=(-extent, extent), ylim=(-extent, extent))
+        axes.set_xticks([-4000, -2000, 0, 2000, 4000]); axes.set_yticks([-4000, -2000, 0, 2000, 4000])
         axes.tick_params(colors='#cbd5e1', labelsize=10)
         for axis in (axes.xaxis, axes.yaxis):
             axis.label.set_color('#cbd5e1')
@@ -171,7 +174,8 @@ class RadioImageCache:
                     payloads = list(pool.map(download, FREQUENCIES))
                 by_target = {row['target_mhz']: row for row in rows}
                 planes = tuple(read_plane(data, by_target[target]) for target, data in zip(FREQUENCIES, payloads))
-                version = hashlib.sha256(stamp.encode() + b''.join(payloads)).hexdigest()[:20]
+                # Immutable PNG URLs must change when the rendering changes too.
+                version = hashlib.sha256(RENDER_PROFILE + stamp.encode() + b''.join(payloads)).hexdigest()[:20]
                 snapshot = ImageSnapshot(stamp, observed.isoformat().replace('+00:00', 'Z'),
                                          version, planes, self.renderer(planes))
                 if len(snapshot.pngs) != 4:

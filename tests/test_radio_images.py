@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 import numpy as np
 from astropy.io import fits
 from fastapi.testclient import TestClient
-from radio_images import RadioImageCache, FREQUENCIES, read_plane, solar_view, render_planes
+from radio_images import RadioImageCache, FREQUENCIES, ImagePlane, read_plane, solar_view, render_planes
 from stream_receiver import StreamReceiver
 
 
@@ -169,6 +169,30 @@ class RadioImageTests(unittest.TestCase):
             with Image.open(io.BytesIO(png)) as image:
                 self.assertEqual(image.format, 'PNG')
                 self.assertEqual(image.size, (600, 500))
+
+    def test_wider_field_preserves_emission_outside_previous_crop(self):
+        header = fits.Header({'CTYPE1': 'HPLN-TAN', 'CTYPE2': 'HPLT-TAN',
+                              'CUNIT1': 'arcsec', 'CUNIT2': 'arcsec',
+                              'CRPIX1': 128.5, 'CRPIX2': 128.5, 'CRVAL1': 0., 'CRVAL2': 0.,
+                              'CDELT1': 60., 'CDELT2': 60.})
+        y, x = np.indices((256, 256))
+        image = np.exp(-((x - 202.5) ** 2 + (y - 127.5) ** 2) / 8)
+        plane = ImagePlane(30, 30.1, self.stamp, image, header)
+        self.assertLess(np.nanmax(solar_view(plane, extent=3000)), .01)
+        view = solar_view(plane)
+        row, column = np.unravel_index(np.nanargmax(view), view.shape)
+        self.assertGreater(view[row, column], .9)
+        self.assertAlmostEqual(-6000 + (column + .5) * 12000 / 512, 4500, delta=30)
+        self.assertAlmostEqual(-6000 + (row + .5) * 12000 / 512, 0, delta=30)
+
+    def test_changed_render_profile_changes_immutable_image_version(self):
+        self.cache.refresh_once()
+        previous = self.cache.metadata()['version']
+        other = RadioImageCache('http://source:8080', opener=self.open,
+                                renderer=self.render, clock=lambda: self.now)
+        with patch('radio_images.RENDER_PROFILE', b'previous-narrow-field'):
+            other.refresh_once()
+        self.assertNotEqual(previous, other.metadata()['version'])
 
     def test_http_replies_are_cached_and_versioned_with_etags(self):
         self.cache.refresh_once()
