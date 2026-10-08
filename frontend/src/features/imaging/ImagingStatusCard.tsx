@@ -37,9 +37,16 @@ export function ImagingStatusCard() {
               {fraction === null ? '—' : `${(fraction * 100).toFixed(1)}%`}
             </span>
           </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800" role="meter" aria-label="Flagged visibility samples"
+          <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-slate-800" role="meter" aria-label="Flagged visibility samples"
             aria-valuemin={0} aria-valuemax={100} aria-valuenow={fraction === null ? undefined : fraction * 100}>
-            {fraction !== null && <div className="h-full rounded-full bg-amber-400" style={{width: `${fraction * 100}%`}} />}
+            {fraction !== null && <>
+              <div aria-hidden="true" className="h-full shrink-0 bg-red-400" style={{width: `${fraction * 100}%`}} />
+              <div aria-hidden="true" className="h-full shrink-0 bg-emerald-400" style={{width: `${(1 - fraction) * 100}%`}} />
+            </>}
+          </div>
+          <div className="mt-1 flex justify-between gap-2 text-[10px]">
+            <span className="text-red-400">● Flagged</span>
+            <span className="text-emerald-400">● Not flagged</span>
           </div>
           <p className="mt-1 text-[10px] text-slate-500">Flagged visibility samples across baselines</p>
         </section>

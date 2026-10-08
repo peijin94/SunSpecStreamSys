@@ -185,7 +185,9 @@ The imaging QA card shows a per-band baseline flagging percentage and an
 A-team flux table for CasA, CygA, TauA, and VirA, with measured/expected Jy
 values and their ratio. The flagging percentage is the API's `flagged_frac`:
 flagged visibility samples across baselines. It is distinct from the number
-of fully flagged antennas on the map. The default band is nearest 60 MHz;
+of fully flagged antennas on the map. The bar shows flagged samples in red
+on the left and the remaining unflagged samples in green on the right; an
+unknown fraction leaves the bar gray. The default band is nearest 60 MHz;
 the selector provides the other recorded bands. Missing measurements are —.
 
 `imaging_status.py` polls the same calim12 QA API every 60 seconds in a separate
