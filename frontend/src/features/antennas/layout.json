@@ -1,0 +1,2127 @@
+{
+  "source": "https://github.com/ovro-lwa/lwa-antpos",
+  "source_commit": "6228cdf98db0f13dcc0271cbc0a3e9b4b8704340",
+  "source_file": "lwa_antpos/data/system_cfg.yml",
+  "source_sha256": "7639ff3916b2c6a933ad62d9b0a5d8214bfd9650ae1e29f93f5200ee765ba0af",
+  "coordinate_system": "WGS84 ECEF rotated to local east/north, relative to LWA-000",
+  "reference": {
+    "latitude_deg": 37.23977727,
+    "longitude_deg": -118.2816667,
+    "height_m": 1222.0
+  },
+  "id_system": "zero-based MS ANTENNA index, matching corr_num",
+  "antennas": [
+    {
+      "id": 0,
+      "name": "LWA-266",
+      "east_m": -263.802,
+      "north_m": 297.376
+    },
+    {
+      "id": 1,
+      "name": "LWA-259",
+      "east_m": -229.295,
+      "north_m": 923.795
+    },
+    {
+      "id": 2,
+      "name": "LWA-268",
+      "east_m": -296.895,
+      "north_m": 370.996
+    },
+    {
+      "id": 3,
+      "name": "LWA-267",
+      "east_m": -9.316,
+      "north_m": 440.638
+    },
+    {
+      "id": 4,
+      "name": "LWA-271",
+      "east_m": -335.084,
+      "north_m": 801.172
+    },
+    {
+      "id": 5,
+      "name": "LWA-269",
+      "east_m": 137.626,
+      "north_m": 557.734
+    },
+    {
+      "id": 6,
+      "name": "LWA-276",
+      "east_m": -539.701,
+      "north_m": 571.736
+    },
+    {
+      "id": 7,
+      "name": "LWA-273",
+      "east_m": -661.857,
+      "north_m": 576.3
+    },
+    {
+      "id": 8,
+      "name": "LWA-278",
+      "east_m": -173.152,
+      "north_m": 685.509
+    },
+    {
+      "id": 9,
+      "name": "LWA-277",
+      "east_m": 123.766,
+      "north_m": 646.772
+    },
+    {
+      "id": 10,
+      "name": "LWA-282",
+      "east_m": -158.226,
+      "north_m": 496.159
+    },
+    {
+      "id": 11,
+      "name": "LWA-281",
+      "east_m": -266.789,
+      "north_m": 260.068
+    },
+    {
+      "id": 12,
+      "name": "LWA-307",
+      "east_m": -248.947,
+      "north_m": 508.823
+    },
+    {
+      "id": 13,
+      "name": "LWA-285",
+      "east_m": -403.339,
+      "north_m": 533.036
+    },
+    {
+      "id": 14,
+      "name": "LWA-309",
+      "east_m": -15.474,
+      "north_m": 686.071
+    },
+    {
+      "id": 15,
+      "name": "LWA-308",
+      "east_m": -247.31,
+      "north_m": 617.372
+    },
+    {
+      "id": 16,
+      "name": "LWA-311",
+      "east_m": -439.869,
+      "north_m": 339.839
+    },
+    {
+      "id": 17,
+      "name": "LWA-310",
+      "east_m": -58.871,
+      "north_m": 601.899
+    },
+    {
+      "id": 18,
+      "name": "LWA-313",
+      "east_m": 254.615,
+      "north_m": 402.882
+    },
+    {
+      "id": 19,
+      "name": "LWA-312",
+      "east_m": -516.322,
+      "north_m": 461.417
+    },
+    {
+      "id": 20,
+      "name": "LWA-321",
+      "east_m": -524.499,
+      "north_m": 720.797
+    },
+    {
+      "id": 21,
+      "name": "LWA-314",
+      "east_m": 116.976,
+      "north_m": 386.378
+    },
+    {
+      "id": 22,
+      "name": "LWA-330",
+      "east_m": 134.905,
+      "north_m": 782.789
+    },
+    {
+      "id": 23,
+      "name": "LWA-327",
+      "east_m": -428.258,
+      "north_m": 864.668
+    },
+    {
+      "id": 24,
+      "name": "LWA-338",
+      "east_m": -84.29,
+      "north_m": 371.64
+    },
+    {
+      "id": 25,
+      "name": "LWA-332",
+      "east_m": -74.405,
+      "north_m": 791.8
+    },
+    {
+      "id": 26,
+      "name": "LWA-340",
+      "east_m": -364.831,
+      "north_m": 641.467
+    },
+    {
+      "id": 27,
+      "name": "LWA-339",
+      "east_m": -201.702,
+      "north_m": 782.385
+    },
+    {
+      "id": 28,
+      "name": "LWA-352",
+      "east_m": -602.045,
+      "north_m": 402.391
+    },
+    {
+      "id": 29,
+      "name": "LWA-341",
+      "east_m": -1102.413,
+      "north_m": -744.294
+    },
+    {
+      "id": 30,
+      "name": "LWA-362",
+      "east_m": 382.891,
+      "north_m": -599.424
+    },
+    {
+      "id": 31,
+      "name": "LWA-353",
+      "east_m": -1169.065,
+      "north_m": 1074.491
+    },
+    {
+      "id": 32,
+      "name": "LWA-257",
+      "east_m": -690.914,
+      "north_m": -258.037
+    },
+    {
+      "id": 33,
+      "name": "LWA-255",
+      "east_m": -265.082,
+      "north_m": 5.757
+    },
+    {
+      "id": 34,
+      "name": "LWA-260",
+      "east_m": -588.531,
+      "north_m": 272.57
+    },
+    {
+      "id": 35,
+      "name": "LWA-258",
+      "east_m": -1045.485,
+      "north_m": 339.52
+    },
+    {
+      "id": 36,
+      "name": "LWA-265",
+      "east_m": -321.95,
+      "north_m": -52.282
+    },
+    {
+      "id": 37,
+      "name": "LWA-263",
+      "east_m": -283.83,
+      "north_m": -399.634
+    },
+    {
+      "id": 38,
+      "name": "LWA-272",
+      "east_m": -847.889,
+      "north_m": 413.385
+    },
+    {
+      "id": 39,
+      "name": "LWA-270",
+      "east_m": -675.839,
+      "north_m": -64.052
+    },
+    {
+      "id": 40,
+      "name": "LWA-283",
+      "east_m": -789.761,
+      "north_m": -202.845
+    },
+    {
+      "id": 41,
+      "name": "LWA-280",
+      "east_m": -779.168,
+      "north_m": 28.325
+    },
+    {
+      "id": 42,
+      "name": "LWA-288",
+      "east_m": -768.247,
+      "north_m": 379.574
+    },
+    {
+      "id": 43,
+      "name": "LWA-284",
+      "east_m": -425.339,
+      "north_m": 121.689
+    },
+    {
+      "id": 44,
+      "name": "LWA-292",
+      "east_m": -914.292,
+      "north_m": 107.688
+    },
+    {
+      "id": 45,
+      "name": "LWA-291",
+      "east_m": -1022.98,
+      "north_m": 245.374
+    },
+    {
+      "id": 46,
+      "name": "LWA-296",
+      "east_m": -714.007,
+      "north_m": 233.401
+    },
+    {
+      "id": 47,
+      "name": "LWA-295",
+      "east_m": -549.427,
+      "north_m": 130.331
+    },
+    {
+      "id": 48,
+      "name": "LWA-301",
+      "east_m": -509.683,
+      "north_m": -405.146
+    },
+    {
+      "id": 49,
+      "name": "LWA-298",
+      "east_m": 346.465,
+      "north_m": 1088.62
+    },
+    {
+      "id": 50,
+      "name": "LWA-305",
+      "east_m": -418.717,
+      "north_m": 18.163
+    },
+    {
+      "id": 51,
+      "name": "LWA-303",
+      "east_m": -406.262,
+      "north_m": -271.759
+    },
+    {
+      "id": 52,
+      "name": "LWA-317",
+      "east_m": -395.297,
+      "north_m": -167.681
+    },
+    {
+      "id": 53,
+      "name": "LWA-306",
+      "east_m": -538.265,
+      "north_m": -161.089
+    },
+    {
+      "id": 54,
+      "name": "LWA-320",
+      "east_m": -947.454,
+      "north_m": 447.861
+    },
+    {
+      "id": 55,
+      "name": "LWA-318",
+      "east_m": -272.112,
+      "north_m": -244.515
+    },
+    {
+      "id": 56,
+      "name": "LWA-336",
+      "east_m": -737.69,
+      "north_m": 163.34
+    },
+    {
+      "id": 57,
+      "name": "LWA-335",
+      "east_m": -916.177,
+      "north_m": -91.018
+    },
+    {
+      "id": 58,
+      "name": "LWA-343",
+      "east_m": -437.648,
+      "north_m": 239.807
+    },
+    {
+      "id": 59,
+      "name": "LWA-337",
+      "east_m": -355.609,
+      "north_m": 114.254
+    },
+    {
+      "id": 60,
+      "name": "LWA-351",
+      "east_m": -844.103,
+      "north_m": 278.171
+    },
+    {
+      "id": 61,
+      "name": "LWA-344",
+      "east_m": -571.736,
+      "north_m": 13.191
+    },
+    {
+      "id": 62,
+      "name": "LWA-360",
+      "east_m": 308.971,
+      "north_m": -772.821
+    },
+    {
+      "id": 63,
+      "name": "LWA-354",
+      "east_m": -899.258,
+      "north_m": 1032.1
+    },
+    {
+      "id": 64,
+      "name": "LWA-002",
+      "east_m": 64.174,
+      "north_m": 65.311
+    },
+    {
+      "id": 65,
+      "name": "LWA-001",
+      "east_m": 67.394,
+      "north_m": 74.902
+    },
+    {
+      "id": 66,
+      "name": "LWA-004",
+      "east_m": 62.87,
+      "north_m": 47.038
+    },
+    {
+      "id": 67,
+      "name": "LWA-003",
+      "east_m": 74.208,
+      "north_m": 61.752
+    },
+    {
+      "id": 68,
+      "name": "LWA-006",
+      "east_m": 70.749,
+      "north_m": 36.675
+    },
+    {
+      "id": 69,
+      "name": "LWA-005",
+      "east_m": 83.921,
+      "north_m": 42.514
+    },
+    {
+      "id": 70,
+      "name": "LWA-009",
+      "east_m": 70.088,
+      "north_m": 23.972
+    },
+    {
+      "id": 71,
+      "name": "LWA-007",
+      "east_m": 91.326,
+      "north_m": 35.917
+    },
+    {
+      "id": 72,
+      "name": "LWA-011",
+      "east_m": 80.953,
+      "north_m": 19.279
+    },
+    {
+      "id": 73,
+      "name": "LWA-010",
+      "east_m": 61.085,
+      "north_m": 21.667
+    },
+    {
+      "id": 74,
+      "name": "LWA-012",
+      "east_m": 80.22,
+      "north_m": 12.741
+    },
+    {
+      "id": 75,
+      "name": "LWA-008",
+      "east_m": 71.244,
+      "north_m": 31.309
+    },
+    {
+      "id": 76,
+      "name": "LWA-040",
+      "east_m": 47.122,
+      "north_m": 51.106
+    },
+    {
+      "id": 77,
+      "name": "LWA-038",
+      "east_m": 55.488,
+      "north_m": 56.97
+    },
+    {
+      "id": 78,
+      "name": "LWA-042",
+      "east_m": 51.869,
+      "north_m": 38.719
+    },
+    {
+      "id": 79,
+      "name": "LWA-041",
+      "east_m": 34.556,
+      "north_m": 40.889
+    },
+    {
+      "id": 80,
+      "name": "LWA-044",
+      "east_m": 53.297,
+      "north_m": 20.808
+    },
+    {
+      "id": 81,
+      "name": "LWA-043",
+      "east_m": 42.711,
+      "north_m": 25.699
+    },
+    {
+      "id": 82,
+      "name": "LWA-046",
+      "east_m": 56.098,
+      "north_m": 12.973
+    },
+    {
+      "id": 83,
+      "name": "LWA-045",
+      "east_m": 41.569,
+      "north_m": 15.787
+    },
+    {
+      "id": 84,
+      "name": "LWA-071",
+      "east_m": 26.47,
+      "north_m": 34.644
+    },
+    {
+      "id": 85,
+      "name": "LWA-047",
+      "east_m": 41.056,
+      "north_m": 7.402
+    },
+    {
+      "id": 86,
+      "name": "LWA-074",
+      "east_m": 33.246,
+      "north_m": 20.002
+    },
+    {
+      "id": 87,
+      "name": "LWA-073",
+      "east_m": 30.576,
+      "north_m": 29.28
+    },
+    {
+      "id": 88,
+      "name": "LWA-077",
+      "east_m": 30.384,
+      "north_m": 9.277
+    },
+    {
+      "id": 89,
+      "name": "LWA-075",
+      "east_m": 21.386,
+      "north_m": 18.098
+    },
+    {
+      "id": 90,
+      "name": "LWA-275",
+      "east_m": 314.977,
+      "north_m": 645.029
+    },
+    {
+      "id": 91,
+      "name": "LWA-274",
+      "east_m": 147.342,
+      "north_m": 100.014
+    },
+    {
+      "id": 92,
+      "name": "LWA-302",
+      "east_m": -350.497,
+      "north_m": -648.726
+    },
+    {
+      "id": 93,
+      "name": "LWA-286",
+      "east_m": -1111.752,
+      "north_m": 52.927
+    },
+    {
+      "id": 94,
+      "name": "LWA-363",
+      "east_m": 201.206,
+      "north_m": -500.906
+    },
+    {
+      "id": 95,
+      "name": "LWA-323",
+      "east_m": 208.608,
+      "north_m": 203.648
+    },
+    {
+      "id": 96,
+      "name": "LWA-013",
+      "east_m": 72.375,
+      "north_m": 5.933
+    },
+    {
+      "id": 97,
+      "name": "LWA-016",
+      "east_m": 89.406,
+      "north_m": 0.133
+    },
+    {
+      "id": 98,
+      "name": "LWA-015",
+      "east_m": 95.949,
+      "north_m": 0.606
+    },
+    {
+      "id": 99,
+      "name": "LWA-014",
+      "east_m": 60.501,
+      "north_m": 5.58
+    },
+    {
+      "id": 100,
+      "name": "LWA-018",
+      "east_m": 91.991,
+      "north_m": -7.179
+    },
+    {
+      "id": 101,
+      "name": "LWA-017",
+      "east_m": 73.915,
+      "north_m": -6.231
+    },
+    {
+      "id": 102,
+      "name": "LWA-020",
+      "east_m": 78.08,
+      "north_m": -16.426
+    },
+    {
+      "id": 103,
+      "name": "LWA-019",
+      "east_m": 65.513,
+      "north_m": -14.541
+    },
+    {
+      "id": 104,
+      "name": "LWA-022",
+      "east_m": 67.449,
+      "north_m": -22.833
+    },
+    {
+      "id": 105,
+      "name": "LWA-021",
+      "east_m": 101.513,
+      "north_m": -20.374
+    },
+    {
+      "id": 106,
+      "name": "LWA-024",
+      "east_m": 62.449,
+      "north_m": -28.503
+    },
+    {
+      "id": 107,
+      "name": "LWA-023",
+      "east_m": 86.075,
+      "north_m": -26.992
+    },
+    {
+      "id": 108,
+      "name": "LWA-026",
+      "east_m": 69.668,
+      "north_m": -35.022
+    },
+    {
+      "id": 109,
+      "name": "LWA-025",
+      "east_m": 92.91,
+      "north_m": -31.966
+    },
+    {
+      "id": 110,
+      "name": "LWA-029",
+      "east_m": 97.707,
+      "north_m": -49.402
+    },
+    {
+      "id": 111,
+      "name": "LWA-027",
+      "east_m": 81.656,
+      "north_m": -35.096
+    },
+    {
+      "id": 112,
+      "name": "LWA-049",
+      "east_m": 43.662,
+      "north_m": -5.235
+    },
+    {
+      "id": 113,
+      "name": "LWA-048",
+      "east_m": 36.792,
+      "north_m": -1.809
+    },
+    {
+      "id": 114,
+      "name": "LWA-051",
+      "east_m": 37.932,
+      "north_m": -10.666
+    },
+    {
+      "id": 115,
+      "name": "LWA-050",
+      "east_m": 48.204,
+      "north_m": -7.473
+    },
+    {
+      "id": 116,
+      "name": "LWA-053",
+      "east_m": 45.321,
+      "north_m": -18.392
+    },
+    {
+      "id": 117,
+      "name": "LWA-052",
+      "east_m": 45.45,
+      "north_m": -11.803
+    },
+    {
+      "id": 118,
+      "name": "LWA-054",
+      "east_m": 43.801,
+      "north_m": -26.475
+    },
+    {
+      "id": 119,
+      "name": "LWA-080",
+      "east_m": 31.521,
+      "north_m": -5.313
+    },
+    {
+      "id": 120,
+      "name": "LWA-084",
+      "east_m": 34.206,
+      "north_m": -22.485
+    },
+    {
+      "id": 121,
+      "name": "LWA-055",
+      "east_m": 48.06,
+      "north_m": -34.376
+    },
+    {
+      "id": 122,
+      "name": "LWA-324",
+      "east_m": 271.503,
+      "north_m": 18.887
+    },
+    {
+      "id": 123,
+      "name": "LWA-262",
+      "east_m": 151.317,
+      "north_m": -80.218
+    },
+    {
+      "id": 124,
+      "name": "LWA-348",
+      "east_m": -1222.242,
+      "north_m": -95.173
+    },
+    {
+      "id": 125,
+      "name": "LWA-331",
+      "east_m": 3.68,
+      "north_m": 910.567
+    },
+    {
+      "id": 126,
+      "name": "LWA-365",
+      "east_m": -93.797,
+      "north_m": -923.092
+    },
+    {
+      "id": 127,
+      "name": "LWA-364",
+      "east_m": 10.296,
+      "north_m": -569.914
+    },
+    {
+      "id": 128,
+      "name": "LWA-030",
+      "east_m": 80.836,
+      "north_m": -52.162
+    },
+    {
+      "id": 129,
+      "name": "LWA-028",
+      "east_m": 63.876,
+      "north_m": -43.779
+    },
+    {
+      "id": 130,
+      "name": "LWA-032",
+      "east_m": 67.187,
+      "north_m": -69.162
+    },
+    {
+      "id": 131,
+      "name": "LWA-031",
+      "east_m": 64.659,
+      "north_m": -55.029
+    },
+    {
+      "id": 132,
+      "name": "LWA-063",
+      "east_m": 41.605,
+      "north_m": -88.753
+    },
+    {
+      "id": 133,
+      "name": "LWA-060",
+      "east_m": 51.243,
+      "north_m": -61.615
+    },
+    {
+      "id": 134,
+      "name": "LWA-057",
+      "east_m": 43.68,
+      "north_m": -43.057
+    },
+    {
+      "id": 135,
+      "name": "LWA-056",
+      "east_m": 38.325,
+      "north_m": -34.617
+    },
+    {
+      "id": 136,
+      "name": "LWA-059",
+      "east_m": 43.244,
+      "north_m": -56.372
+    },
+    {
+      "id": 137,
+      "name": "LWA-058",
+      "east_m": 53.528,
+      "north_m": -48.522
+    },
+    {
+      "id": 138,
+      "name": "LWA-062",
+      "east_m": 56.326,
+      "north_m": -72.814
+    },
+    {
+      "id": 139,
+      "name": "LWA-061",
+      "east_m": 36.713,
+      "north_m": -64.98
+    },
+    {
+      "id": 140,
+      "name": "LWA-085",
+      "east_m": 23.832,
+      "north_m": -30.083
+    },
+    {
+      "id": 141,
+      "name": "LWA-064",
+      "east_m": 46.594,
+      "north_m": -89.185
+    },
+    {
+      "id": 142,
+      "name": "LWA-087",
+      "east_m": 18.883,
+      "north_m": -37.899
+    },
+    {
+      "id": 143,
+      "name": "LWA-086",
+      "east_m": 32.313,
+      "north_m": -33.063
+    },
+    {
+      "id": 144,
+      "name": "LWA-089",
+      "east_m": 17.568,
+      "north_m": -52.763
+    },
+    {
+      "id": 145,
+      "name": "LWA-096",
+      "east_m": 19.663,
+      "north_m": -96.753
+    },
+    {
+      "id": 146,
+      "name": "LWA-091",
+      "east_m": 24.429,
+      "north_m": -67.8
+    },
+    {
+      "id": 147,
+      "name": "LWA-090",
+      "east_m": 25.287,
+      "north_m": -60.631
+    },
+    {
+      "id": 148,
+      "name": "LWA-093",
+      "east_m": 31.453,
+      "north_m": -83.447
+    },
+    {
+      "id": 149,
+      "name": "LWA-092",
+      "east_m": 30.331,
+      "north_m": -74.797
+    },
+    {
+      "id": 150,
+      "name": "LWA-095",
+      "east_m": 27.317,
+      "north_m": -93.152
+    },
+    {
+      "id": 151,
+      "name": "LWA-094",
+      "east_m": 17.76,
+      "north_m": -84.244
+    },
+    {
+      "id": 152,
+      "name": "LWA-122",
+      "east_m": 15.02,
+      "north_m": -44.905
+    },
+    {
+      "id": 153,
+      "name": "LWA-121",
+      "east_m": 8.689,
+      "north_m": -34.082
+    },
+    {
+      "id": 154,
+      "name": "LWA-325",
+      "east_m": 415.368,
+      "north_m": 925.073
+    },
+    {
+      "id": 155,
+      "name": "LWA-316",
+      "east_m": -1001.169,
+      "north_m": -143.568
+    },
+    {
+      "id": 156,
+      "name": "LWA-334",
+      "east_m": 358.439,
+      "north_m": 399.935
+    },
+    {
+      "id": 157,
+      "name": "LWA-328",
+      "east_m": -452.567,
+      "north_m": 1049.612
+    },
+    {
+      "id": 158,
+      "name": "LWA-361",
+      "east_m": 63.337,
+      "north_m": -151.423
+    },
+    {
+      "id": 159,
+      "name": "LWA-358",
+      "east_m": 107.948,
+      "north_m": -269.887
+    },
+    {
+      "id": 160,
+      "name": "LWA-035",
+      "east_m": 43.694,
+      "north_m": 66.349
+    },
+    {
+      "id": 161,
+      "name": "LWA-033",
+      "east_m": 43.712,
+      "north_m": 92.376
+    },
+    {
+      "id": 162,
+      "name": "LWA-034",
+      "east_m": 56.638,
+      "north_m": 73.455
+    },
+    {
+      "id": 163,
+      "name": "LWA-036",
+      "east_m": 35.028,
+      "north_m": 64.88
+    },
+    {
+      "id": 164,
+      "name": "LWA-066",
+      "east_m": 30.982,
+      "north_m": 89.249
+    },
+    {
+      "id": 165,
+      "name": "LWA-065",
+      "east_m": 27.826,
+      "north_m": 98.851
+    },
+    {
+      "id": 166,
+      "name": "LWA-068",
+      "east_m": 29.689,
+      "north_m": 76.71
+    },
+    {
+      "id": 167,
+      "name": "LWA-067",
+      "east_m": 23.482,
+      "north_m": 83.215
+    },
+    {
+      "id": 168,
+      "name": "LWA-070",
+      "east_m": 16.467,
+      "north_m": 54.032
+    },
+    {
+      "id": 169,
+      "name": "LWA-069",
+      "east_m": 26.917,
+      "north_m": 66.722
+    },
+    {
+      "id": 170,
+      "name": "LWA-097",
+      "east_m": 10.067,
+      "north_m": 100.924
+    },
+    {
+      "id": 171,
+      "name": "LWA-072",
+      "east_m": 16.79,
+      "north_m": 30.879
+    },
+    {
+      "id": 172,
+      "name": "LWA-099",
+      "east_m": 11.32,
+      "north_m": 67.411
+    },
+    {
+      "id": 173,
+      "name": "LWA-098",
+      "east_m": 10.349,
+      "north_m": 77.312
+    },
+    {
+      "id": 174,
+      "name": "LWA-101",
+      "east_m": 10.632,
+      "north_m": 51.172
+    },
+    {
+      "id": 175,
+      "name": "LWA-100",
+      "east_m": 4.404,
+      "north_m": 59.048
+    },
+    {
+      "id": 176,
+      "name": "LWA-103",
+      "east_m": 2.931,
+      "north_m": 46.333
+    },
+    {
+      "id": 177,
+      "name": "LWA-102",
+      "east_m": -0.813,
+      "north_m": 50.829
+    },
+    {
+      "id": 178,
+      "name": "LWA-105",
+      "east_m": 12.986,
+      "north_m": 38.005
+    },
+    {
+      "id": 179,
+      "name": "LWA-104",
+      "east_m": 12.032,
+      "north_m": 45.026
+    },
+    {
+      "id": 180,
+      "name": "LWA-129",
+      "east_m": -15.06,
+      "north_m": 98.902
+    },
+    {
+      "id": 181,
+      "name": "LWA-037",
+      "east_m": 43.593,
+      "north_m": 56.883
+    },
+    {
+      "id": 182,
+      "name": "LWA-131",
+      "east_m": -5.946,
+      "north_m": 86.442
+    },
+    {
+      "id": 183,
+      "name": "LWA-130",
+      "east_m": -4.075,
+      "north_m": 97.755
+    },
+    {
+      "id": 184,
+      "name": "LWA-134",
+      "east_m": -4.881,
+      "north_m": 74.724
+    },
+    {
+      "id": 185,
+      "name": "LWA-132",
+      "east_m": -12.294,
+      "north_m": 80.763
+    },
+    {
+      "id": 186,
+      "name": "LWA-252",
+      "east_m": 87.285,
+      "north_m": 250.36
+    },
+    {
+      "id": 187,
+      "name": "LWA-139",
+      "east_m": -3.394,
+      "north_m": 36.095
+    },
+    {
+      "id": 188,
+      "name": "LWA-294",
+      "east_m": 38.67,
+      "north_m": 152.477
+    },
+    {
+      "id": 189,
+      "name": "LWA-289",
+      "east_m": -599.34,
+      "north_m": -640.987
+    },
+    {
+      "id": 190,
+      "name": "LWA-319",
+      "east_m": -1194.499,
+      "north_m": 451.096
+    },
+    {
+      "id": 191,
+      "name": "LWA-299",
+      "east_m": 346.853,
+      "north_m": -357.938
+    },
+    {
+      "id": 192,
+      "name": "LWA-078",
+      "east_m": 25.109,
+      "north_m": 6.109
+    },
+    {
+      "id": 193,
+      "name": "LWA-076",
+      "east_m": 20.055,
+      "north_m": 9.581
+    },
+    {
+      "id": 194,
+      "name": "LWA-081",
+      "east_m": 21.035,
+      "north_m": -8.76
+    },
+    {
+      "id": 195,
+      "name": "LWA-079",
+      "east_m": 17.743,
+      "north_m": 2.59
+    },
+    {
+      "id": 196,
+      "name": "LWA-108",
+      "east_m": 9.986,
+      "north_m": 17.185
+    },
+    {
+      "id": 197,
+      "name": "LWA-107",
+      "east_m": 10.926,
+      "north_m": 27.868
+    },
+    {
+      "id": 198,
+      "name": "LWA-110",
+      "east_m": -0.877,
+      "north_m": 12.383
+    },
+    {
+      "id": 199,
+      "name": "LWA-109",
+      "east_m": 2.859,
+      "north_m": 15.657
+    },
+    {
+      "id": 200,
+      "name": "LWA-112",
+      "east_m": 5.915,
+      "north_m": 1.688
+    },
+    {
+      "id": 201,
+      "name": "LWA-111",
+      "east_m": 11.207,
+      "north_m": 12.194
+    },
+    {
+      "id": 202,
+      "name": "LWA-114",
+      "east_m": 4.604,
+      "north_m": -5.516
+    },
+    {
+      "id": 203,
+      "name": "LWA-113",
+      "east_m": 0.272,
+      "north_m": -2.915
+    },
+    {
+      "id": 204,
+      "name": "LWA-116",
+      "east_m": 4.082,
+      "north_m": -11.329
+    },
+    {
+      "id": 205,
+      "name": "LWA-115",
+      "east_m": -0.743,
+      "north_m": -8.325
+    },
+    {
+      "id": 206,
+      "name": "LWA-118",
+      "east_m": 5.682,
+      "north_m": -19.054
+    },
+    {
+      "id": 207,
+      "name": "LWA-117",
+      "east_m": -0.162,
+      "north_m": -15.999
+    },
+    {
+      "id": 208,
+      "name": "LWA-120",
+      "east_m": -0.605,
+      "north_m": -23.384
+    },
+    {
+      "id": 209,
+      "name": "LWA-082",
+      "east_m": 24.261,
+      "north_m": -16.526
+    },
+    {
+      "id": 210,
+      "name": "LWA-143",
+      "east_m": -3.308,
+      "north_m": 23.987
+    },
+    {
+      "id": 211,
+      "name": "LWA-142",
+      "east_m": -5.84,
+      "north_m": 28.313
+    },
+    {
+      "id": 212,
+      "name": "LWA-145",
+      "east_m": -6.592,
+      "north_m": 15.968
+    },
+    {
+      "id": 213,
+      "name": "LWA-144",
+      "east_m": -13.739,
+      "north_m": 22.656
+    },
+    {
+      "id": 214,
+      "name": "LWA-147",
+      "east_m": -14.6,
+      "north_m": 4.191
+    },
+    {
+      "id": 215,
+      "name": "LWA-150",
+      "east_m": -6.474,
+      "north_m": -21.963
+    },
+    {
+      "id": 216,
+      "name": "LWA-149",
+      "east_m": -9.781,
+      "north_m": -13.944
+    },
+    {
+      "id": 217,
+      "name": "LWA-148",
+      "east_m": -10.392,
+      "north_m": -6.681
+    },
+    {
+      "id": 218,
+      "name": "LWA-151",
+      "east_m": -18.124,
+      "north_m": -22.354
+    },
+    {
+      "id": 219,
+      "name": "LWA-172",
+      "east_m": -23.685,
+      "north_m": 7.68
+    },
+    {
+      "id": 220,
+      "name": "LWA-279",
+      "east_m": 353.471,
+      "north_m": 542.897
+    },
+    {
+      "id": 221,
+      "name": "LWA-178",
+      "east_m": -19.339,
+      "north_m": -14.769
+    },
+    {
+      "id": 222,
+      "name": "LWA-355",
+      "east_m": -51.567,
+      "north_m": -413.55
+    },
+    {
+      "id": 223,
+      "name": "LWA-287",
+      "east_m": -999.711,
+      "north_m": 554.668
+    },
+    {
+      "id": 224,
+      "name": "LWA-124",
+      "east_m": 4.494,
+      "north_m": -55.101
+    },
+    {
+      "id": 225,
+      "name": "LWA-127",
+      "east_m": 3.877,
+      "north_m": -81.962
+    },
+    {
+      "id": 226,
+      "name": "LWA-126",
+      "east_m": 13.218,
+      "north_m": -73.588
+    },
+    {
+      "id": 227,
+      "name": "LWA-125",
+      "east_m": 5.455,
+      "north_m": -72.154
+    },
+    {
+      "id": 228,
+      "name": "LWA-188",
+      "east_m": -19.711,
+      "north_m": -71.561
+    },
+    {
+      "id": 229,
+      "name": "LWA-128",
+      "east_m": 0.786,
+      "north_m": -96.41
+    },
+    {
+      "id": 230,
+      "name": "LWA-153",
+      "east_m": -9.346,
+      "north_m": -35.896
+    },
+    {
+      "id": 231,
+      "name": "LWA-181",
+      "east_m": -21.868,
+      "north_m": -26.011
+    },
+    {
+      "id": 232,
+      "name": "LWA-155",
+      "east_m": -3.594,
+      "north_m": -46.703
+    },
+    {
+      "id": 233,
+      "name": "LWA-154",
+      "east_m": -8.177,
+      "north_m": -44.32
+    },
+    {
+      "id": 234,
+      "name": "LWA-157",
+      "east_m": -8.299,
+      "north_m": -56.551
+    },
+    {
+      "id": 235,
+      "name": "LWA-156",
+      "east_m": -10.177,
+      "north_m": -51.875
+    },
+    {
+      "id": 236,
+      "name": "LWA-159",
+      "east_m": -11.431,
+      "north_m": -86.459
+    },
+    {
+      "id": 237,
+      "name": "LWA-158",
+      "east_m": -3.834,
+      "north_m": -80.368
+    },
+    {
+      "id": 238,
+      "name": "LWA-182",
+      "east_m": -26.471,
+      "north_m": -41.128
+    },
+    {
+      "id": 239,
+      "name": "LWA-160",
+      "east_m": -15.256,
+      "north_m": -99.525
+    },
+    {
+      "id": 240,
+      "name": "LWA-185",
+      "east_m": -20.163,
+      "north_m": -49.135
+    },
+    {
+      "id": 241,
+      "name": "LWA-184",
+      "east_m": -18.947,
+      "north_m": -42.649
+    },
+    {
+      "id": 242,
+      "name": "LWA-187",
+      "east_m": -28.43,
+      "north_m": -60.989
+    },
+    {
+      "id": 243,
+      "name": "LWA-186",
+      "east_m": -35.135,
+      "north_m": -50.993
+    },
+    {
+      "id": 244,
+      "name": "LWA-190",
+      "east_m": -20.257,
+      "north_m": -79.054
+    },
+    {
+      "id": 245,
+      "name": "LWA-189",
+      "east_m": -30.046,
+      "north_m": -78.659
+    },
+    {
+      "id": 246,
+      "name": "LWA-191",
+      "east_m": -28.13,
+      "north_m": -86.028
+    },
+    {
+      "id": 247,
+      "name": "LWA-192",
+      "east_m": -27.209,
+      "north_m": -91.922
+    },
+    {
+      "id": 248,
+      "name": "LWA-224",
+      "east_m": -46.087,
+      "north_m": -85.92
+    },
+    {
+      "id": 249,
+      "name": "LWA-222",
+      "east_m": -42.812,
+      "north_m": -70.561
+    },
+    {
+      "id": 250,
+      "name": "LWA-326",
+      "east_m": 294.345,
+      "north_m": 731.094
+    },
+    {
+      "id": 251,
+      "name": "LWA-322",
+      "east_m": -693.435,
+      "north_m": 995.974
+    },
+    {
+      "id": 252,
+      "name": "LWA-345",
+      "east_m": -37.511,
+      "north_m": -163.594
+    },
+    {
+      "id": 253,
+      "name": "LWA-333",
+      "east_m": 392.657,
+      "north_m": 154.499
+    },
+    {
+      "id": 254,
+      "name": "LWA-359",
+      "east_m": -26.003,
+      "north_m": -298.021
+    },
+    {
+      "id": 255,
+      "name": "LWA-347",
+      "east_m": -1145.502,
+      "north_m": -356.08
+    },
+    {
+      "id": 256,
+      "name": "LWA-135",
+      "east_m": -16.855,
+      "north_m": 58.218
+    },
+    {
+      "id": 257,
+      "name": "LWA-133",
+      "east_m": -15.453,
+      "north_m": 76.136
+    },
+    {
+      "id": 258,
+      "name": "LWA-137",
+      "east_m": -18.853,
+      "north_m": 53.229
+    },
+    {
+      "id": 259,
+      "name": "LWA-136",
+      "east_m": -13.505,
+      "north_m": 53.61
+    },
+    {
+      "id": 260,
+      "name": "LWA-140",
+      "east_m": -11.077,
+      "north_m": 34.36
+    },
+    {
+      "id": 261,
+      "name": "LWA-138",
+      "east_m": -9.86,
+      "north_m": 40.843
+    },
+    {
+      "id": 262,
+      "name": "LWA-161",
+      "east_m": -35.195,
+      "north_m": 100.308
+    },
+    {
+      "id": 263,
+      "name": "LWA-141",
+      "east_m": -18.018,
+      "north_m": 31.185
+    },
+    {
+      "id": 264,
+      "name": "LWA-163",
+      "east_m": -36.368,
+      "north_m": 74.866
+    },
+    {
+      "id": 265,
+      "name": "LWA-162",
+      "east_m": -21.977,
+      "north_m": 82.363
+    },
+    {
+      "id": 266,
+      "name": "LWA-165",
+      "east_m": -34.665,
+      "north_m": 52.827
+    },
+    {
+      "id": 267,
+      "name": "LWA-164",
+      "east_m": -19.857,
+      "north_m": 65.449
+    },
+    {
+      "id": 268,
+      "name": "LWA-167",
+      "east_m": -28.982,
+      "north_m": 35.047
+    },
+    {
+      "id": 269,
+      "name": "LWA-166",
+      "east_m": -20.18,
+      "north_m": 43.562
+    },
+    {
+      "id": 270,
+      "name": "LWA-193",
+      "east_m": -53.34,
+      "north_m": 89.591
+    },
+    {
+      "id": 271,
+      "name": "LWA-198",
+      "east_m": -38.379,
+      "north_m": 59.914
+    },
+    {
+      "id": 272,
+      "name": "LWA-195",
+      "east_m": -59.875,
+      "north_m": 81.324
+    },
+    {
+      "id": 273,
+      "name": "LWA-194",
+      "east_m": -44.384,
+      "north_m": 84.861
+    },
+    {
+      "id": 274,
+      "name": "LWA-197",
+      "east_m": -55.096,
+      "north_m": 61.338
+    },
+    {
+      "id": 275,
+      "name": "LWA-196",
+      "east_m": -43.344,
+      "north_m": 63.962
+    },
+    {
+      "id": 276,
+      "name": "LWA-200",
+      "east_m": -50.085,
+      "north_m": 50.807
+    },
+    {
+      "id": 277,
+      "name": "LWA-199",
+      "east_m": -61.234,
+      "north_m": 53.092
+    },
+    {
+      "id": 278,
+      "name": "LWA-202",
+      "east_m": -41.434,
+      "north_m": 39.649
+    },
+    {
+      "id": 279,
+      "name": "LWA-201",
+      "east_m": -40.725,
+      "north_m": 47.62
+    },
+    {
+      "id": 280,
+      "name": "LWA-227",
+      "east_m": -64.228,
+      "north_m": 57.262
+    },
+    {
+      "id": 281,
+      "name": "LWA-225",
+      "east_m": -73.974,
+      "north_m": 75.686
+    },
+    {
+      "id": 282,
+      "name": "LWA-349",
+      "east_m": -821.279,
+      "north_m": 586.553
+    },
+    {
+      "id": 283,
+      "name": "LWA-253",
+      "east_m": -76.475,
+      "north_m": 253.873
+    },
+    {
+      "id": 284,
+      "name": "LWA-293",
+      "east_m": -57.212,
+      "north_m": 149.936
+    },
+    {
+      "id": 285,
+      "name": "LWA-290",
+      "east_m": -695.905,
+      "north_m": -439.75
+    },
+    {
+      "id": 286,
+      "name": "LWA-357",
+      "east_m": 223.494,
+      "north_m": -257.683
+    },
+    {
+      "id": 287,
+      "name": "LWA-329",
+      "east_m": 251.417,
+      "north_m": 870.977
+    },
+    {
+      "id": 288,
+      "name": "LWA-170",
+      "east_m": -36.999,
+      "north_m": 19.607
+    },
+    {
+      "id": 289,
+      "name": "LWA-234",
+      "east_m": -82.571,
+      "north_m": 7.784
+    },
+    {
+      "id": 290,
+      "name": "LWA-173",
+      "east_m": -36.466,
+      "north_m": 6.079
+    },
+    {
+      "id": 291,
+      "name": "LWA-171",
+      "east_m": -24.873,
+      "north_m": 16.276
+    },
+    {
+      "id": 292,
+      "name": "LWA-169",
+      "east_m": -29.325,
+      "north_m": 26.839
+    },
+    {
+      "id": 293,
+      "name": "LWA-175",
+      "east_m": -30.816,
+      "north_m": 3.312
+    },
+    {
+      "id": 294,
+      "name": "LWA-204",
+      "east_m": -47.986,
+      "north_m": 27.827
+    },
+    {
+      "id": 295,
+      "name": "LWA-203",
+      "east_m": -63.126,
+      "north_m": 34.127
+    },
+    {
+      "id": 296,
+      "name": "LWA-206",
+      "east_m": -47.914,
+      "north_m": 15.894
+    },
+    {
+      "id": 297,
+      "name": "LWA-205",
+      "east_m": -59.15,
+      "north_m": 20.113
+    },
+    {
+      "id": 298,
+      "name": "LWA-208",
+      "east_m": -49.188,
+      "north_m": 7.98
+    },
+    {
+      "id": 299,
+      "name": "LWA-207",
+      "east_m": -39.445,
+      "north_m": 12.007
+    },
+    {
+      "id": 300,
+      "name": "LWA-210",
+      "east_m": -45.886,
+      "north_m": -2.319
+    },
+    {
+      "id": 301,
+      "name": "LWA-209",
+      "east_m": -49.337,
+      "north_m": 2.873
+    },
+    {
+      "id": 302,
+      "name": "LWA-228",
+      "east_m": -78.243,
+      "north_m": 44.633
+    },
+    {
+      "id": 303,
+      "name": "LWA-230",
+      "east_m": -84.849,
+      "north_m": 36.597
+    },
+    {
+      "id": 304,
+      "name": "LWA-226",
+      "east_m": -79.441,
+      "north_m": 58.68
+    },
+    {
+      "id": 305,
+      "name": "LWA-229",
+      "east_m": -74.291,
+      "north_m": 38.897
+    },
+    {
+      "id": 306,
+      "name": "LWA-233",
+      "east_m": -64.218,
+      "north_m": 16.081
+    },
+    {
+      "id": 307,
+      "name": "LWA-232",
+      "east_m": -86.795,
+      "north_m": 19.928
+    },
+    {
+      "id": 308,
+      "name": "LWA-236",
+      "east_m": -76.751,
+      "north_m": 1.642
+    },
+    {
+      "id": 309,
+      "name": "LWA-235",
+      "east_m": -67.636,
+      "north_m": 5.721
+    },
+    {
+      "id": 310,
+      "name": "LWA-238",
+      "east_m": -63.201,
+      "north_m": -4.3
+    },
+    {
+      "id": 311,
+      "name": "LWA-237",
+      "east_m": -92.259,
+      "north_m": -2.242
+    },
+    {
+      "id": 312,
+      "name": "LWA-240",
+      "east_m": -95.268,
+      "north_m": -15.382
+    },
+    {
+      "id": 313,
+      "name": "LWA-239",
+      "east_m": -65.192,
+      "north_m": -9.712
+    },
+    {
+      "id": 314,
+      "name": "LWA-297",
+      "east_m": 69.145,
+      "north_m": 1089.16
+    },
+    {
+      "id": 315,
+      "name": "LWA-254",
+      "east_m": -211.117,
+      "north_m": 160.433
+    },
+    {
+      "id": 316,
+      "name": "LWA-346",
+      "east_m": -139.419,
+      "north_m": 90.196
+    },
+    {
+      "id": 317,
+      "name": "LWA-342",
+      "east_m": -854.391,
+      "north_m": -330.701
+    },
+    {
+      "id": 318,
+      "name": "LWA-356",
+      "east_m": 91.817,
+      "north_m": -411.973
+    },
+    {
+      "id": 319,
+      "name": "LWA-350",
+      "east_m": -681.025,
+      "north_m": 759.057
+    },
+    {
+      "id": 320,
+      "name": "LWA-177",
+      "east_m": -31.246,
+      "north_m": -9.344
+    },
+    {
+      "id": 321,
+      "name": "LWA-247",
+      "east_m": -81.437,
+      "north_m": -42.614
+    },
+    {
+      "id": 322,
+      "name": "LWA-180",
+      "east_m": -35.0,
+      "north_m": -23.689
+    },
+    {
+      "id": 323,
+      "name": "LWA-179",
+      "east_m": -28.873,
+      "north_m": -16.271
+    },
+    {
+      "id": 324,
+      "name": "LWA-183",
+      "east_m": -31.793,
+      "north_m": -41.412
+    },
+    {
+      "id": 325,
+      "name": "LWA-176",
+      "east_m": -27.714,
+      "north_m": -4.862
+    },
+    {
+      "id": 326,
+      "name": "LWA-212",
+      "east_m": -41.395,
+      "north_m": -18.417
+    },
+    {
+      "id": 327,
+      "name": "LWA-211",
+      "east_m": -47.417,
+      "north_m": -12.389
+    },
+    {
+      "id": 328,
+      "name": "LWA-214",
+      "east_m": -51.702,
+      "north_m": -24.44
+    },
+    {
+      "id": 329,
+      "name": "LWA-213",
+      "east_m": -58.525,
+      "north_m": -19.553
+    },
+    {
+      "id": 330,
+      "name": "LWA-243",
+      "east_m": -84.819,
+      "north_m": -22.162
+    },
+    {
+      "id": 331,
+      "name": "LWA-215",
+      "east_m": -39.711,
+      "north_m": -25.143
+    },
+    {
+      "id": 332,
+      "name": "LWA-218",
+      "east_m": -39.012,
+      "north_m": -42.034
+    },
+    {
+      "id": 333,
+      "name": "LWA-217",
+      "east_m": -49.605,
+      "north_m": -38.991
+    },
+    {
+      "id": 334,
+      "name": "LWA-221",
+      "east_m": -53.562,
+      "north_m": -69.172
+    },
+    {
+      "id": 335,
+      "name": "LWA-219",
+      "east_m": -56.941,
+      "north_m": -43.212
+    },
+    {
+      "id": 336,
+      "name": "LWA-241",
+      "east_m": -72.018,
+      "north_m": -17.09
+    },
+    {
+      "id": 337,
+      "name": "LWA-223",
+      "east_m": -61.235,
+      "north_m": -77.849
+    },
+    {
+      "id": 338,
+      "name": "LWA-244",
+      "east_m": -68.47,
+      "north_m": -28.42
+    },
+    {
+      "id": 339,
+      "name": "LWA-242",
+      "east_m": -80.755,
+      "north_m": -19.31
+    },
+    {
+      "id": 340,
+      "name": "LWA-246",
+      "east_m": -87.94,
+      "north_m": -32.073
+    },
+    {
+      "id": 341,
+      "name": "LWA-245",
+      "east_m": -98.442,
+      "north_m": -30.817
+    },
+    {
+      "id": 342,
+      "name": "LWA-249",
+      "east_m": -81.525,
+      "north_m": -52.665
+    },
+    {
+      "id": 343,
+      "name": "LWA-248",
+      "east_m": -75.195,
+      "north_m": -42.856
+    },
+    {
+      "id": 344,
+      "name": "LWA-251",
+      "east_m": -71.35,
+      "north_m": -66.521
+    },
+    {
+      "id": 345,
+      "name": "LWA-250",
+      "east_m": -68.941,
+      "north_m": -54.409
+    },
+    {
+      "id": 346,
+      "name": "LWA-261",
+      "east_m": 126.363,
+      "north_m": 955.088
+    },
+    {
+      "id": 347,
+      "name": "LWA-256",
+      "east_m": -217.813,
+      "north_m": -151.146
+    },
+    {
+      "id": 348,
+      "name": "LWA-300",
+      "east_m": 395.864,
+      "north_m": -213.669
+    },
+    {
+      "id": 349,
+      "name": "LWA-264",
+      "east_m": -790.131,
+      "north_m": 849.293
+    },
+    {
+      "id": 350,
+      "name": "LWA-315",
+      "east_m": -961.875,
+      "north_m": -254.49
+    },
+    {
+      "id": 351,
+      "name": "LWA-304",
+      "east_m": -140.646,
+      "north_m": -70.827
+    }
+  ]
+}

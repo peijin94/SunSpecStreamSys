@@ -13,6 +13,7 @@ import uuid
 import struct
 from spectrum_time import time_raster, source_box
 from radio_images import RadioImageCache, FREQUENCIES as IMAGE_FREQUENCIES
+from antenna_flags import AntennaFlagCache
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from astropy.time import Time
@@ -137,6 +138,8 @@ class StreamReceiver:
         self.ai_summary_lock = threading.Lock()
         self.radio_images = RadioImageCache(
             os.environ.get('LWA_IMAGE_API_URL', 'http://127.0.0.1:18080'))
+        self.antenna_flags = AntennaFlagCache(os.environ.get(
+            'LWA_QA_API_URL', os.environ.get('LWA_IMAGE_API_URL', 'http://127.0.0.1:18080')))
         
         # Setup logging
         self.setup_logging()
@@ -649,11 +652,12 @@ class StreamReceiver:
             worker = threading.Thread(target=self.analysis_loop, args=(callback,), daemon=True)
             worker.start()
             self.analysis_threads.append(worker)
-        image_worker = threading.Thread(target=self.radio_images.run,
-                                        args=(self.shutdown_event,), daemon=True,
-                                        name='fine-channel-images')
-        image_worker.start()
-        self.analysis_threads.append(image_worker)
+        for cache, name in ((self.radio_images, 'fine-channel-images'),
+                            (self.antenna_flags, 'antenna-flags')):
+            worker = threading.Thread(target=cache.run, args=(self.shutdown_event,),
+                                      daemon=True, name=name)
+            worker.start()
+            self.analysis_threads.append(worker)
         
 
         # Start web server only if enabled
@@ -933,6 +937,10 @@ class StreamReceiver:
             @app.get('/radio-images')
             def get_radio_images():
                 return JSONResponse(self.radio_images.metadata(), headers={'Cache-Control': 'no-store'})
+
+            @app.get('/antenna-flags')
+            def get_antenna_flags():
+                return JSONResponse(self.antenna_flags.metadata(), headers={'Cache-Control': 'no-store'})
 
             @app.get('/radio-images/{target}.png')
             def get_radio_image(target: int, request: Request, version: str = None):

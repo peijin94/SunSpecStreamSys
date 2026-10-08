@@ -141,6 +141,44 @@ agent, since the tunnel is a user service.
 
 ## Components
 
+### Antenna flagging card
+
+The live page includes an SVG antenna layout with north up and east/north axes
+in meters relative to LWA-000. The static template contains 352 antennas from
+`ovro-lwa/lwa-antpos`'s `lwa_antpos/data/system_cfg.yml`, pinned at commit
+`6228cdf98db0f13dcc0271cbc0a3e9b4b8704340`. Coordinates are transformed from
+WGS84 geodetic positions through ECEF to the local east/north plane. Provenance
+is stored in `frontend/src/features/antennas/layout.json`; the upstream BSD
+license is included. `lwa-antpos` is not installed or imported by the website.
+
+The template ID is `corr_num`, matching the zero-based MS ANTENNA table index
+returned by the flagging API. It is not the physical stand number: index 0 is
+LWA-266, index 65 is LWA-001, and index 351 is LWA-304. All 352 names were
+checked against a calim12 measurement-set ANTENNA table before deployment.
+
+`antenna_flags.py` requests `/flagging?timestamp=newest` from calim12 once a
+minute in its own worker. `LWA_QA_API_URL` defaults to `LWA_IMAGE_API_URL`,
+or localhost port 18080 through `lwa-image-tunnel`. `GET /antenna-flags`
+(public `/live/antenna-flags`) replies from memory and includes observation
+UTC, per-band antenna lists, counts and flagging fractions, cache status, and
+the 60-second interval. Source failures retain the preceding observation;
+observations older than ten minutes are explicitly marked stale.
+
+The frontend polls every minute, pauses while hidden, and keeps its preceding
+flags on failure. Red means fully flagged on all participating baselines in
+the selected band; green means absent from the recorded bad-antenna list.
+The default Any band view takes the union of all bands. A missing `ant_list`
+is unknown (gray), while an empty list is valid and shows green. The card also
+offers Full array/Core zoom, counts, point tooltips, and a visible observation
+timestamp. The lower row has four desktop cards, two tablet columns, and one
+mobile column. Cards use their natural heights.
+
+Regenerate the template only during development, with PyYAML available:
+
+```bash
+python tools/generate_antenna_layout.py /path/to/lwa-antpos
+```
+
 ### 1. AvgStreamingOp (in ovro_data_recorder/scripts/dr_beam.py)
 
 This operation class:

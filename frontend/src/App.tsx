@@ -5,6 +5,7 @@ import { submitSpectrumBatch } from './features/spectrum/spectrumRenderer';
 import { useDetectionsPolling } from './features/detections/useDetections';
 import { RadioImagesPanel } from './features/images/RadioImagesPanel';
 import { ObservationInfo } from './components/ObservationInfo';
+import { AntennaFlagsCard } from './features/antennas/AntennaFlagsCard';
 import { Button } from './components/ui/button';
 import {
   Card,
@@ -179,7 +180,8 @@ function App() {
 
         {spectrum.historyLoading && <p role="status" className="text-xs text-slate-400">Loading earlier history… live data continues updating.</p>}
 
-        <section aria-label="Observation status, events, and AI summary" className="grid min-w-0 gap-4 md:grid-cols-3">
+        <section aria-label="Observation status, antenna flagging, events, and AI summary" className="grid min-w-0 items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <AntennaFlagsCard />
           <Card className="bg-slate-900/80 border-slate-800">
             <CardHeader>
               <CardTitle>Obs status and control</CardTitle>
