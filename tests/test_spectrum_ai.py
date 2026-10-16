@@ -41,13 +41,35 @@ class LunaSummaryTests(unittest.TestCase):
         from PIL import Image
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'vision.png'
-            times=np.array([1792113000.,1792113000.5,1792113060.])
+            # A genuinely night-time source window, not a forced Sun-down flag.
+            times=np.array([1792113000.,1792113000.5,1792113060.])+7200
             i=np.full((3,768),240000.,dtype=np.float32)
-            prompt,window=render_ai_spectrum(({},i,-.1*i,times),path,sun_up=False)
+            prompt,window=render_ai_spectrum(({},i,-.1*i,times),path)
             with Image.open(path) as image:self.assertGreaterEqual(image.width,800)
             self.assertIn('UTC',prompt);self.assertIn('Stokes I',prompt);self.assertIn('V/I',prompt)
             self.assertIn('night',prompt.lower());self.assertIn('2026-10-16',prompt)
             self.assertEqual(window['source_end'],times[-1]);self.assertEqual(window['source_start'],times[0])
+
+    def test_prompt_has_source_ut_time_and_matching_solar_elevation_azimuth(self):
+        from spectrum_ai import render_ai_spectrum
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+        import numpy as np
+        times=np.array([1792113000.,1792113000.5,1792113060.])
+        i=np.full((3,768),240000.,dtype=np.float32)
+        expected_time=datetime.fromtimestamp(times[-1],timezone.utc).isoformat(timespec='seconds')
+        with tempfile.TemporaryDirectory() as root, patch('check_sun_elevation.get_sun_position',
+                return_value={'elevation_deg':-12.25,'azimuth_deg':74.5}) as position:
+            prompt,window=render_ai_spectrum(({},i,-.1*i,times),Path(root)/'vision.png')
+        self.assertIn('Observation time (UT/UTC): '+expected_time,prompt)
+        self.assertIn('Sun elevation: -12.25 deg',prompt)
+        self.assertIn('Sun azimuth: 74.50 deg',prompt)
+        self.assertIn('clockwise from true north',prompt)
+        self.assertAlmostEqual(position.call_args.kwargs['time'].unix,times[-1],places=5)
+        self.assertEqual(window['observation_time_utc'],expected_time)
+        self.assertEqual(window['sun_elevation_deg'],-12.25)
+        self.assertEqual(window['sun_azimuth_deg'],74.5)
+        self.assertFalse(window['sun_up'])
 
     def test_receiver_updates_luna_metadata_and_rate_limits_without_gemini_key(self):
         import threading,time
@@ -66,7 +88,7 @@ class LunaSummaryTests(unittest.TestCase):
             r.last_ai_attempt=0;r.ai_summary_interval=60;r.latest_ai_summary=''
             r.ai_summary_lock=threading.Lock();r.last_ai_summary_time=0
             now=time.time();case.frame(10,now-1);case.frame(11,now-.5)
-            with patch.dict(os.environ,{'GEMINI_API_KEY':''}),patch('check_sun_elevation.is_sun_up',return_value=False):
+            with patch.dict(os.environ,{'GEMINI_API_KEY':''}),patch('check_sun_elevation.get_sun_position',return_value={'elevation_deg':-12.25,'azimuth_deg':74.5}):
                 r.run_ai_summary();r.run_ai_summary()
             self.assertEqual(r.latest_ai_summary,'Fixture Luna result.')
             self.assertEqual(r.ai_client.calls,1)
@@ -99,7 +121,7 @@ class LunaSummaryTests(unittest.TestCase):
             r.ai_summary_interval=60;r.last_ai_attempt=0;r.latest_ai_summary='Prior real interpretation.'
             r.last_ai_summary_time=now-30;r.ai_summary_lock=threading.Lock()
             r.ai_window={'source_start':now-60,'source_end':now-30};r.ai_error=''
-            with patch('check_sun_elevation.is_sun_up',return_value=False),self.assertLogs(r.log,level='WARNING'):
+            with patch('check_sun_elevation.get_sun_position',return_value={'elevation_deg':-12.25,'azimuth_deg':74.5}),self.assertLogs(r.log,level='WARNING'):
                 r.run_ai_summary()
             result=r.ai_summary_payload()
             self.assertEqual(result['summary'],'Prior real interpretation.')
@@ -117,7 +139,7 @@ class LunaSummaryTests(unittest.TestCase):
         i=np.full((3,768),240000.,dtype=np.float32)
         times=np.array([1792113000.,1792113001.5,1792113003.])
         with patch.object(Figure,'savefig',capture):
-            render_ai_spectrum(({'integration_seconds':.5},i,-.1*i,times),'unused.png',sun_up=False)
+            render_ai_spectrum(({'integration_seconds':.5},i,-.1*i,times),'unused.png')
         self.assertTrue(captured[0].any(),'Dropped frames must not be painted as continuous emission')
 
     def test_vision_columns_are_time_and_rows_are_frequency(self):
@@ -130,7 +152,7 @@ class LunaSummaryTests(unittest.TestCase):
         i=np.tile(np.arange(768,dtype=np.float32)+240000,(3,1))
         times=np.array([1792113000.,1792113000.5,1792113001.])
         with patch.object(Figure,'savefig',capture):
-            render_ai_spectrum(({},i,-.1*i,times),'unused.png',sun_up=False)
+            render_ai_spectrum(({},i,-.1*i,times),'unused.png')
         self.assertEqual(captured[0].shape,(768,600),'Vision image must not swap time and frequency')
         np.testing.assert_allclose(captured[0][:,-1],i[-1]/1e4)
 

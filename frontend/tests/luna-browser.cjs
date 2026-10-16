@@ -8,9 +8,29 @@ let browser;
  browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||undefined});
  const page=await browser.newPage({viewport:{width:1440,height:1100}});const errors=[];
  page.on('pageerror',e=>errors.push(String(e)));
+ // Optional pre-deployment bundle, with all API requests still going to the real service.
+ if(process.env.LWA_TEST_DIST){
+  const path=require('node:path'),dist=path.resolve(process.env.LWA_TEST_DIST);
+  await page.route(new URL('assets/**',base).href,route=>{
+   const relative=new URL(route.request().url()).pathname.split('/assets/')[1];
+   const asset=path.resolve(dist,'assets',relative);
+   assert.ok(asset.startsWith(path.join(dist,'assets')+path.sep));
+   return route.fulfill({path:asset});
+  });
+  await page.route(base,route=>route.fulfill({path:path.join(dist,'index.html')}));
+ }
  await page.goto(base,{waitUntil:'networkidle'});
  const card=page.locator('[data-testid="ai-summary-card"]');
  assert.equal(await page.getByText('Powered by GPT-6 Luna',{exact:false}).count(),1,'AI card must identify Luna, not Gemini');
+ const logo=card.getByRole('img',{name:'OpenAI',exact:true});
+ assert.equal(await logo.count(),1,'AI summary heading must use the OpenAI logo');
+ const geometry=await logo.evaluate(svg=>{
+  const title=svg.parentElement.querySelector('h3');
+  const icon=svg.getBoundingClientRect(),heading=title.getBoundingClientRect();
+  return {tag:svg.tagName,path:!!svg.querySelector('path'),width:icon.width,height:icon.height,before:icon.right<=heading.left+1};
+ });
+ assert.equal(geometry.tag.toLowerCase(),'svg');assert.ok(geometry.path&&geometry.before);
+ assert.ok(geometry.width>=16&&geometry.height>=16,'OpenAI mark must be visible before the heading');
  const response=await page.request.get(new URL('ai-summary',base).href);assert.equal(response.status(),200);
  const data=await response.json();assert.equal(data.model,'gpt-6-luna');assert.equal(data.provider,'openai-codex');
  assert.ok(data.summary&&data.timestamp>0,'A real successful Luna summary must already be cached');

@@ -93,6 +93,9 @@ export interface AiSummaryResponse {
   source_start?: number;
   source_end?: number;
   sun_up?: boolean;
+  observation_time_utc?: string;
+  sun_elevation_deg?: number;
+  sun_azimuth_deg?: number;
 }
 
 export interface VisitorCountResponse {

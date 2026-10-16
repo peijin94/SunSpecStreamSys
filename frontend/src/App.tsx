@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from './components/ui/card';
 import * as React from 'react';
+import OpenAI from '@lobehub/icons/es/OpenAI/components/Mono';
 import type { SpectrumCanvasHandle } from './features/spectrum/SpectrumCanvas';
 import {
   fetchAiSummary,
@@ -392,7 +393,7 @@ function App() {
             <CardHeader>
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2">
-                  <span aria-hidden="true" className="text-emerald-300">✦</span>
+                  <OpenAI size={18} role="img" aria-label="OpenAI" className="shrink-0 text-slate-200" />
                   <CardTitle>AI summary</CardTitle>
                 </div>
                 <span className="text-[10px] tracking-wide text-slate-500">

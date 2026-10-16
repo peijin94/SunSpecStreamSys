@@ -360,10 +360,8 @@ class StreamReceiver:
                 self.ai_error='Waiting for fresh spectrum data'
             return
         try:
-            import check_sun_elevation
             image_path=os.path.join(self.plot_dir,'ai-input.png')
-            prompt,window=render_ai_spectrum((metadata,intensity,circular,stamps),image_path,
-                                           sun_up=check_sun_elevation.is_sun_up())
+            prompt,window=render_ai_spectrum((metadata,intensity,circular,stamps),image_path)
             text=self.ai_client.describe(image_path,prompt)
             with self.ai_summary_lock:
                 self.latest_ai_summary=text

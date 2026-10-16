@@ -26,6 +26,19 @@ import argparse
 # Coordinates: 37.2339° N, 118.2817° W, elevation ~1222 m
 OVRO = EarthLocation(lat=37.2339*u.deg, lon=-118.2817*u.deg, height=1222*u.m)
 
+def get_sun_position(location=OVRO, time=None):
+    """Return topocentric Sun elevation and azimuth, in degrees, at one instant.
+
+    Azimuth is clockwise from true north (north=0, east=90). The default
+    zero-pressure AltAz frame matches the existing elevation calculation.
+    """
+    if time is None:
+        time = Time.now()
+    position = get_sun(time).transform_to(AltAz(obstime=time, location=location))
+    return {'elevation_deg': float(position.alt.deg),
+            'azimuth_deg': float(position.az.deg)}
+
+
 def get_sun_elevation(location=OVRO, time=None):
     """
     Get the Sun's elevation at a given location and time.

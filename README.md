@@ -113,17 +113,22 @@ The cached AI card uses `gpt-6-luna` through the host's existing **Codex CLI dev
 login**, not Gemini or an API key. Every 60 seconds an independent worker sends a
 labelled image of the latest five-minute paired Stokes I / V/I spectrum, with true
 UTC spacing, missing-data masks, frequency direction, units, and Sun-up/night-time
-context. This is the **latest live** analysis, not a paused browser's historical
-selection. Only fresh valid samples are analyzed.
+context. The prompt includes the latest integration's **UT/UTC timestamp** and
+OVRO-LWA solar **elevation and azimuth** at that same source time, calculated with
+the existing Astropy/OVRO location. Elevation is geometric degrees above the
+horizon; azimuth is degrees clockwise from true north (north=0, east=90).
+This is the **latest live** analysis, not a paused browser's historical selection.
+Only fresh valid samples are analyzed.
 
 The CLI runs an ephemeral, read-only job with shell/browser/plugin/agent tools and
 host skill discovery disabled, a filtered environment (no unrelated API keys),
 structured JSON output, and a 45-second timeout that kills its own process group.
 Failures cannot block acquisition; they retain the preceding successful Luna
 interpretation and mark it stale. `/ai-summary` retains `summary`/`timestamp` and
-adds `model`, `provider`, `status`, `error`, source UTC bounds, and Sun-up context.
-The frontend labels the model and stale results explicitly. Account availability
-and usage limits still apply; there is no silent Gemini fallback.
+adds `model`, `provider`, `status`, `error`, source UTC bounds, Sun-up context,
+`observation_time_utc`, `sun_elevation_deg`, and `sun_azimuth_deg`. The frontend
+uses the OpenAI logo and labels the model and stale results explicitly. Account
+availability and usage limits still apply; there is no silent Gemini fallback.
 
 Use a current CLI (the ovsa integration was exercised with 0.163.0). Set
 `LWA_CODEX_EXECUTABLE` to its executable/native binary and `LWA_AI_MODEL` to the
