@@ -88,6 +88,49 @@ wall-clock arrival time. A deployment can hand off raw I/V and Unix timestamps i
 `<plot_dir>/restart-snapshot.npz`; the receiver validates freshness and consumes
 it once. The detector/AI still receive only the recent 600-frame analysis window.
 
+### Cold-start history from NPZ
+
+If no valid deployment handoff populated the buffer, startup reads the configured
+archive directory (`/common/lwa/stream_spec_npz/` in production). It scans only
+relevant UTC day directories and at most 32 recent chunks, retaining source
+samples within the last real UTC hour, deduplicated and in chronological order.
+Old night-time archives are **not** relabelled as current data. Missing periods
+remain blank until new integrations arrive.
+
+The loader reverses the existing `1e4 * 24` archive normalization into raw Jy,
+validates the 768-channel frequency grid and paired I/V shape, skips corrupt files,
+and honors explicit normalization metadata in new archives. Legacy unversioned
+files can contain chronological power planes but cyclic physical-ring MJD arrays;
+only that time array is rotated back into chronological order, in memory. Originals
+are never modified. New files carry `archive_version=2` and `normalization_factor`.
+Prefill does not count toward the 600 **new** integrations needed for the next
+archive, and queued live samples already covered by the bootstrap tail are ignored.
+`get_buffer_status()` includes `prefill` counters and source for diagnostics.
+
+### AI interpretation: GPT-6 Luna
+
+The cached AI card uses `gpt-6-luna` through the host's existing **Codex CLI device
+login**, not Gemini or an API key. Every 60 seconds an independent worker sends a
+labelled image of the latest five-minute paired Stokes I / V/I spectrum, with true
+UTC spacing, missing-data masks, frequency direction, units, and Sun-up/night-time
+context. This is the **latest live** analysis, not a paused browser's historical
+selection. Only fresh valid samples are analyzed.
+
+The CLI runs an ephemeral, read-only job with shell/browser/plugin/agent tools and
+host skill discovery disabled, a filtered environment (no unrelated API keys),
+structured JSON output, and a 45-second timeout that kills its own process group.
+Failures cannot block acquisition; they retain the preceding successful Luna
+interpretation and mark it stale. `/ai-summary` retains `summary`/`timestamp` and
+adds `model`, `provider`, `status`, `error`, source UTC bounds, and Sun-up context.
+The frontend labels the model and stale results explicitly. Account availability
+and usage limits still apply; there is no silent Gemini fallback.
+
+Use a current CLI (the ovsa integration was exercised with 0.163.0). Set
+`LWA_CODEX_EXECUTABLE` to its executable/native binary and `LWA_AI_MODEL` to the
+model identifier (default `gpt-6-luna`). The deployed unit names the current native
+user-installed CLI explicitly: the system Node/Codex installation is older and
+cannot run the new integration. No credential file needs to be copied or inspected.
+
 Type III detection uses a cached YOLO model with confidence threshold 0.55
 (previously 0.60), retaining IoU 0.60 and a five-second inference interval.
 Detection and the sixty-second AI summary each run in their own worker thread
@@ -436,9 +479,10 @@ The `[address]` should be `127.0.0.1` if this is on local machine (calim02).
 #### As a systemd service (deployed on `ovsa`)
 
 `deploy/lwa-stream-receiver.service` runs the receiver as a systemd **user**
-service: it keeps the checkout as the working directory, reads `GEMINI_API_KEY`
-from `~/.config/lwa-stream-receiver.env` (mode 0600 — without that file the
-receiver still runs, only the live AI summary is skipped), and restarts on exit.
+service: it keeps the checkout as the working directory, uses the configured
+native Codex CLI and existing device login for Luna interpretation, and restarts
+on exit. It no longer loads the old Gemini environment file; that private file is
+left untouched. Adjust `LWA_CODEX_EXECUTABLE` in the unit if the CLI moves.
 
 ```bash
 install -m 0644 deploy/lwa-stream-receiver.service ~/.config/systemd/user/
@@ -484,7 +528,7 @@ systemctl --user enable --now lwa-stream-tunnel
 
 - `--addr`: Stream address (default: 127.0.0.1)
 - `--port`: Stream port (default: 9798)
-- `--buffer-length`: Ring buffer length (default: 1200)
+- `--buffer-length`: Ring capacity (default: one hour at the source cadence, 7201 at 0.5 s)
 - `--gc-interval`: Garbage collection interval in frames (default: 100)
 - `--plot-interval`: Plotting interval in seconds (0 = disable plotting, default: 10)
 - `--plot-dir`: Directory to save plots (default: /fast/peijinz/streaming/figs/)

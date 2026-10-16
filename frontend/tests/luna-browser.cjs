@@ -1,0 +1,33 @@
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright-core');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const base=process.env.LWA_TEST_URL||'https://ovsa.njit.edu/live/';
+const out=process.env.LWA_TEST_OUTPUT||process.env.TMPDIR;
+let browser;
+(async()=>{
+ browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||undefined});
+ const page=await browser.newPage({viewport:{width:1440,height:1100}});const errors=[];
+ page.on('pageerror',e=>errors.push(String(e)));
+ await page.goto(base,{waitUntil:'networkidle'});
+ const card=page.locator('[data-testid="ai-summary-card"]');
+ assert.equal(await page.getByText('Powered by GPT-6 Luna',{exact:false}).count(),1,'AI card must identify Luna, not Gemini');
+ const response=await page.request.get(new URL('ai-summary',base).href);assert.equal(response.status(),200);
+ const data=await response.json();assert.equal(data.model,'gpt-6-luna');assert.equal(data.provider,'openai-codex');
+ assert.ok(data.summary&&data.timestamp>0,'A real successful Luna summary must already be cached');
+ assert.ok(data.source_end>=data.source_start);assert.ok(data.source_end-data.source_start<=301);
+ assert.equal(data.status,'ready');assert.equal(data.error,'');
+ await card.waitFor();assert.ok((await card.innerText()).includes(data.summary.slice(0,40)),'UI shows actual API summary');
+ assert.equal(await page.getByText(/gemini/i).count(),0);
+ assert.deepEqual(errors,[]);
+ if(out){fs.mkdirSync(out,{recursive:true});await card.screenshot({path:out+'/luna-card.png'});fs.writeFileSync(out+'/luna-browser.json',JSON.stringify({base,data,errors},null,2));}
+ console.log('PASS Luna model, real interpretation, source window, UI label/content, no browser errors');
+ await page.route('**/ai-summary',route=>route.fulfill({json:{summary:'Previous Luna interpretation.',timestamp:data.timestamp,model:'gpt-6-luna',provider:'openai-codex',status:'stale',error:'Codex image interpretation timed out'}}));
+ await page.reload({waitUntil:'networkidle'});
+ assert.ok((await page.getByTestId('ai-summary-card').innerText()).includes('Previous Luna interpretation.'));
+ assert.ok((await page.getByTestId('ai-summary-card').innerText()).includes('Stale'));
+ console.log('PASS prior interpretation is explicitly marked stale on model failure (fixture API)');
+ await page.setViewportSize({width:390,height:844});
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ assert.deepEqual(errors,[]);console.log('PASS mobile layout and no browser errors');
+ await browser.close();
+})().catch(async error=>{console.error(error);await browser?.close();process.exitCode=1;});

@@ -86,6 +86,13 @@ export interface DetectionResponse {
 export interface AiSummaryResponse {
   summary: string;
   timestamp: number;
+  model: string;
+  provider: string;
+  status: 'waiting' | 'ready' | 'stale' | 'error';
+  error?: string;
+  source_start?: number;
+  source_end?: number;
+  sun_up?: boolean;
 }
 
 export interface VisitorCountResponse {

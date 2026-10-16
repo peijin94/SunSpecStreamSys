@@ -12,6 +12,8 @@ import sqlite3
 import uuid
 import struct
 from spectrum_time import time_raster, source_box
+from spectrum_prefill import load_npz_history
+from spectrum_ai import CodexSpectrumClient, SpectrumSummaryError, render_ai_spectrum, DEFAULT_MODEL
 from spectrum_history import (HISTORY_SECONDS, RECENT_FRAMES, validate_range,
                               average_time_bins, json_rows, encode_binary)
 from radio_images import RadioImageCache, FREQUENCIES as IMAGE_FREQUENCIES
@@ -136,7 +138,11 @@ class StreamReceiver:
         self.latest_detections = []  # Store latest detection results
         self.detection_lock = threading.Lock()  # Thread safety for detections
 
-        # AI summary (Gemini) of latest spectrum
+        # Image interpretation through the host Codex OAuth login
+        self.ai_model = os.environ.get('LWA_AI_MODEL', DEFAULT_MODEL)
+        self.ai_client = CodexSpectrumClient(model=self.ai_model, work_dir=self.plot_dir)
+        self.ai_window = {}
+        self.ai_error = ''
         self.ai_summary_interval = 60.0  # seconds
         self.last_ai_summary_time = 0.0
         self.last_ai_attempt = 0.0
@@ -153,7 +159,10 @@ class StreamReceiver:
 
         # Visitor logging database
         self._init_visitor_db()
+        self.prefill_info = {'source':'none','frames':0,'files':0}
         self.restore_restart_snapshot()
+        if not self.frames_received:
+            self.restore_archive_buffer()
         
         self.log.info(f"StreamReceiver initialized: {stream_addr}:{stream_port}")
         if self.start_webshow:
@@ -177,10 +186,32 @@ class StreamReceiver:
                 self.ring_arr_mjd[:count, 0] = times / 86400.0 + 40587.0
                 self.buffer_index = count % self.buffer_length
                 self.frames_received = count
+                self.bootstrap_watermark_mjd = float(self.ring_arr_mjd[count-1,0])
+                self.prefill_info = {'source':'handoff','frames':count,'files':1}
             os.replace(path, os.path.join(self.plot_dir, 'restart-snapshot.used.npz'))
             self.log.info(f'Restored {count} timestamped source frames for deployment')
         except Exception as exc:
             self.log.warning(f'Restart snapshot skipped: {exc}')
+
+    def restore_archive_buffer(self):
+        """Prefill a genuinely empty receiver from only the last real UTC hour."""
+        if self.frames_received:
+            return
+        intensity, circular, times, info = load_npz_history(
+            self.save_dir, time.time(), self.buffer_length, self.log)
+        with self.buffer_lock:
+            if self.frames_received:
+                return
+            count = len(times)
+            self.ring_buffer[:count] = intensity
+            self.ring_buffer_v[:count] = circular
+            self.ring_arr_mjd[:count,0] = times/86400+40587
+            self.frames_received = count
+            self.buffer_index = count % self.buffer_length
+            self.prefill_info = info
+            if count:
+                self.bootstrap_watermark_mjd = float(self.ring_arr_mjd[count-1,0])
+        self.log.info('Archive prefill: %s source frames from %s files',count,info['files'])
 
     def setup_logging(self):
         """Setup logging configuration"""
@@ -229,7 +260,8 @@ class StreamReceiver:
         freq_upper = 196*((600+3072-1)/8192)
         freq_array = np.linspace(freq_lower, freq_upper, data_out.shape[1])
 
-        np.savez(f'{save_dir}/{filename}', data=data_out/norm_factor, mjd=mjd_data, freq=freq_array)
+        np.savez(f'{save_dir}/{filename}', data=data_out/norm_factor, mjd=mjd_data, freq=freq_array,
+                 archive_version=np.int16(2), normalization_factor=np.float64(norm_factor))
         self.log.info(f"Latest data saved to {save_dir}/{filename}")
         return f'{save_dir}/{filename}'
 
@@ -313,69 +345,51 @@ class StreamReceiver:
             self.log.error(f"Failed to record visit: {e}")
 
     def run_ai_summary(self):
-        """Generate an AI summary of the latest spectrum using Gemini."""
+        """Interpret paired recent spectra using the existing host Codex login."""
         current_time = time.time()
         if current_time - self.last_ai_attempt < self.ai_summary_interval:
             return
-
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            # Silent if not configured
+        metadata,intensity,circular,stamps = self._get_spectrum_arrays()
+        keep=(stamps>=current_time-300)&(stamps<=current_time+1)
+        intensity,circular,stamps=intensity[keep],circular[keep],stamps[keep]
+        if len(stamps)<2:
             return
-
-        snapshot = self._get_spectrum_arrays()
-        if not len(snapshot[3]):
+        self.last_ai_attempt=current_time
+        if stamps[-1]<current_time-120 or not np.any(np.isfinite(intensity)&(intensity>0)):
+            with self.ai_summary_lock:
+                self.ai_error='Waiting for fresh spectrum data'
             return
-        self.last_ai_attempt = current_time
         try:
-            image_path = self.save_latest_data_to_jpg(snapshot=snapshot, filename="ai-input.jpg")
-            if not os.path.exists(image_path):
-                self.log.warning(f"AI summary: image not found at {image_path}")
-                return
+            import check_sun_elevation
+            image_path=os.path.join(self.plot_dir,'ai-input.png')
+            prompt,window=render_ai_spectrum((metadata,intensity,circular,stamps),image_path,
+                                           sun_up=check_sun_elevation.is_sun_up())
+            text=self.ai_client.describe(image_path,prompt)
+            with self.ai_summary_lock:
+                self.latest_ai_summary=text
+                self.last_ai_summary_time=time.time()
+                self.ai_window=window
+                self.ai_error=''
+            self.log.info('AI interpretation updated with %s (source end %.3f)',self.ai_model,stamps[-1])
+        except Exception as exc:
+            # Never expose CLI stderr, which can contain authentication material.
+            message=str(exc) if isinstance(exc,SpectrumSummaryError) else 'Spectrum interpretation unavailable'
+            with self.ai_summary_lock:
+                self.ai_error=message
+            self.log.warning('AI interpretation unavailable (%s)',type(exc).__name__)
 
-            # Gemini Python SDK (see https://ai.google.dev/gemini-api/docs)
-            from google import genai
-
-            client = genai.Client(api_key=api_key)
-
-            with open(image_path, "rb") as f:
-                img_bytes = f.read()
-
-            prompt = (
-                "read this spectrum from ovro-lwa, low frequency dynamic spectrum\n"
-                "5min segment, top to down is 16MHz to 85MHz, left to right is early to late. duration is 5min\n"
-                "describe what is in the spectrum whether it is radio burst or quiet sun\n"
-                "describe short and precise"
-            )
-
-            response = client.models.generate_content(
-                model="gemini-3.1-flash-lite",
-                contents=[
-                    {
-                        "role": "user",
-                        "parts": [
-                            {"text": prompt},
-                            {
-                                "inline_data": {
-                                    "mime_type": "image/jpeg",
-                                    "data": img_bytes,
-                                }
-                            },
-                        ],
-                    }
-                ],
-            )
-
-            text = (getattr(response, "text", "") or "").strip()
-            if text:
-                with self.ai_summary_lock:
-                    self.latest_ai_summary = text
-                    self.last_ai_summary_time = current_time
-                if self.verbose:
-                    self.log.info(f"AI summary updated: {text}")
-        except Exception as e:
-            # Log and continue; AI summaries are optional
-            self.log.error(f"Error generating AI summary: {e}")
+    def ai_summary_payload(self):
+        with self.ai_summary_lock:
+            text=self.latest_ai_summary
+            timestamp=self.last_ai_summary_time
+            error=getattr(self,'ai_error','')
+            window=dict(getattr(self,'ai_window',{}))
+        source_end=window.get('source_end')
+        stale=bool(error or time.time()-timestamp>self.ai_summary_interval+60 or
+                   (source_end is not None and time.time()-source_end>120))
+        status=('stale' if stale else 'ready') if text else ('error' if error else 'waiting')
+        return {'summary':text,'timestamp':timestamp,'model':self.ai_model,'provider':'openai-codex',
+                'status':status,'error':error,**window}
 
 
     def run_type3_detection(self):
@@ -533,6 +547,10 @@ class StreamReceiver:
             frame_mjd = Time(string_time, format='iso', scale='utc').mjd
             # Publish both polarizations and their timestamp as one integration.
             with self.buffer_lock:
+                watermark = getattr(self, 'bootstrap_watermark_mjd', None)
+                if watermark is not None and frame_mjd <= watermark+1e-11:
+                    return  # Already restored, or queued before the bootstrap tail.
+                self.bootstrap_watermark_mjd = None
                 index = self.buffer_index
                 self.ring_buffer[index, :] = averaged_data
                 self.ring_buffer_v[index, :] = averaged_data_v
@@ -777,6 +795,9 @@ class StreamReceiver:
         return {
             'buffer_index': self.buffer_index,
             'buffer_shape': self.ring_buffer.shape,
+            'frames_received': self.frames_received,
+            'history_seconds': HISTORY_SECONDS,
+            'prefill': getattr(self, 'prefill_info', {'source':'none','frames':0,'files':0}),
             'is_running': self.running,
             'current_delay': self.delay,
             'clock_offset': None, # Removed clock_offset
@@ -1089,15 +1110,7 @@ class StreamReceiver:
 
             @app.get("/ai-summary")
             async def get_ai_summary():
-                with self.ai_summary_lock:
-                    summary = self.latest_ai_summary
-                    ts = self.last_ai_summary_time
-                return JSONResponse(
-                    {
-                        "summary": summary,
-                        "timestamp": ts,
-                    }
-                )
+                return JSONResponse(self.ai_summary_payload())
 
             @app.get("/visitors/recent")
             async def visitors_recent():

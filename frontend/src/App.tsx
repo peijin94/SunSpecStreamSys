@@ -21,17 +21,17 @@ import {
   fetchVisitorCount,
   fetchSunEphemeris,
   type SunEphemeris,
+  type AiSummaryResponse,
 } from './api/client';
-import { Gemini } from '@lobehub/icons';
 
 function App() {
   const spectrum = useSpectrumPolling();
   const detections = useDetectionsPolling();
   const intensityRef =
     React.useRef<SpectrumCanvasHandle | null>(null);
-  const [aiSummary, setAiSummary] = React.useState('');
-  const [aiSummaryTime, setAiSummaryTime] =
-    React.useState<number | null>(null);
+  const [aiResult, setAiResult] = React.useState<AiSummaryResponse | null>(null);
+  const aiSummary = aiResult?.summary ?? '';
+  const aiSummaryTime = aiResult?.timestamp ?? null;
   const [eventsMode, setEventsMode] =
     React.useState<'count' | 'list'>('count');
   const [visitorCount, setVisitorCount] =
@@ -52,14 +52,13 @@ function App() {
       try {
         const data = await fetchAiSummary();
         if (cancelled) return;
-        if (data.summary) {
-          setAiSummary(data.summary);
-          setAiSummaryTime(
-            data.timestamp || null,
-          );
-        }
+        setAiResult(data);
       } catch {
-        // ignore errors for now
+        if (cancelled) return;
+        setAiResult(previous => ({
+          ...(previous ?? { summary: '', timestamp: 0, model: 'gpt-6-luna', provider: 'openai-codex' }),
+          status: previous?.summary ? 'stale' : 'error', error: 'AI summary temporarily unavailable',
+        }));
       }
     }
 
@@ -389,19 +388,25 @@ function App() {
             </CardContent>
           </Card>
 
-          <Card className="bg-slate-900/80 border-slate-800">
+          <Card data-testid="ai-summary-card" className="bg-slate-900/80 border-slate-800">
             <CardHeader>
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2">
-                  <Gemini.Color size={18} />
+                  <span aria-hidden="true" className="text-emerald-300">✦</span>
                   <CardTitle>AI summary</CardTitle>
                 </div>
                 <span className="text-[10px] tracking-wide text-slate-500">
-                  Powered by gemini-3.1-flash-lite
+                  Powered by {aiResult?.model && aiResult.model !== 'gpt-6-luna' ? aiResult.model : 'GPT-6 Luna'}
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  Latest five-minute spectrum · UTC
                 </span>
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              {aiResult?.status === 'stale' && (
+                <p role="status" className="text-xs text-amber-400">Stale interpretation · {aiResult.error || 'Waiting for an updated interpretation'}</p>
+              )}
               {aiSummary ? (
                 <>
                   <p className="text-slate-200">
@@ -418,7 +423,7 @@ function App() {
                 </>
               ) : (
                 <p className="text-slate-500">
-                  Waiting for AI summary...
+                  {aiResult?.error || 'Waiting for AI summary...'}
                 </p>
               )}
             </CardContent>
