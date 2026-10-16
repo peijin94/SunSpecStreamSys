@@ -128,7 +128,7 @@ def plot_spectrums(npz_file_lst, save_plot=True, show_plot=False, output_path=No
         
         # Colorbar for I
         cbar1 = plt.colorbar(im1, ax=ax1, aspect=22)
-        cbar1.set_label('[s.f.u.]', labelpad=10)
+        cbar1.ax.set_title('[sfu]', loc='center', fontsize=10, pad=8)
         
         # Plot Stokes V/I (bottom panel)
         im2 = ax2.imshow(VI_data.T, aspect='auto', origin='lower',

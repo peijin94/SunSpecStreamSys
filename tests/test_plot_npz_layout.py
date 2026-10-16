@@ -11,7 +11,7 @@ import plot_npz
 
 
 class PlotColorbarLayoutTests(unittest.TestCase):
-    def test_sfu_label_clears_all_log_ticks_and_stays_inside_figure(self):
+    def test_sfu_title_is_horizontal_above_colorbar_without_tick_overlap(self):
         for low, high in [(0.4, 2.4), (0.001, 10000.0), (50.0, 1500.0)]:
             with self.subTest(low=low, high=high), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -26,18 +26,27 @@ class PlotColorbarLayoutTests(unittest.TestCase):
                 canvas = FigureCanvasAgg(fig)
                 canvas.draw()
                 renderer = canvas.get_renderer()
-                bars = [axis for axis in fig.axes if axis.get_ylabel() == '[s.f.u.]']
-                self.assertEqual(len(bars), 1, 'The intensity unit must remain present')
+                bars = [axis for axis in fig.axes if axis.get_title() == '[sfu]']
+                self.assertEqual(len(bars), 1, 'The unit must be a horizontal colorbar title')
                 bar = bars[0]
-                unit_box = bar.yaxis.label.get_window_extent(renderer)
+                self.assertEqual(bar.get_ylabel(), '', 'Remove the old vertical unit label')
+                self.assertEqual(bar.title.get_rotation(), 0)
+                unit_box = bar.title.get_window_extent(renderer)
+                bar_box = bar.get_window_extent(renderer)
+                lower, upper = bar.get_ylim()
                 tick_boxes = [label.get_window_extent(renderer)
                               for label in bar.get_yticklabels(which='both')
-                              if label.get_visible() and label.get_text()]
+                              if label.get_visible() and label.get_text()
+                              and lower <= label.get_position()[1] <= upper]
                 self.assertTrue(tick_boxes)
-                self.assertGreaterEqual(unit_box.x0 - max(box.x1 for box in tick_boxes), 5,
-                                        'The sfu label overlaps or crowds logarithmic tick labels')
+                self.assertGreaterEqual(unit_box.y0 - bar_box.y1, 5,
+                                        'The unit title must sit above the colorbar')
+                self.assertFalse(any(unit_box.overlaps(box) for box in tick_boxes))
+                self.assertAlmostEqual((unit_box.x0 + unit_box.x1) / 2,
+                                       (bar_box.x0 + bar_box.x1) / 2, delta=1)
                 self.assertGreaterEqual(unit_box.x0, fig.bbox.x0)
                 self.assertLessEqual(unit_box.x1, fig.bbox.x1)
+                self.assertLessEqual(unit_box.y1, fig.bbox.y1)
                 np.testing.assert_array_equal(np.ma.getdata(fig.axes[0].images[0].get_array()), intensity.T)
                 np.testing.assert_allclose(np.ma.getdata(fig.axes[1].images[0].get_array()), circular.T / intensity.T)
                 self.assertEqual(fig.axes[1].images[0].get_clim(), (-0.7, 0.7))
