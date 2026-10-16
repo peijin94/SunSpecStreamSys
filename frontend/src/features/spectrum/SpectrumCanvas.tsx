@@ -3,14 +3,17 @@ import type { Detection } from '../../api/client';
 import { renderRange } from './rangePixels';
 import { zoomRange, type Point, type RangeBatch, type ViewBounds } from './rangeModel';
 import type { Polarization } from './spectrumRendering';
+import {measurePoint,canMeasurePoint,type MeasurePoint} from './measureModel';
+import {frequencyCrop,FREQUENCY_MAX,FREQUENCY_SPAN} from './frequencyAxis';
 
 export interface SpectrumCanvasHandle { setDetections:(detections:Detection[])=>void }
 interface Props {
   className?:string; polarization:Polarization; data:RangeBatch|null; view:ViewBounds;
   onPause:()=>void; onZoom:(bounds:ViewBounds)=>void;
+  measurePoints?:MeasurePoint[];onMeasurePoint?:(point:MeasurePoint)=>void;
 }
 interface Engine extends SpectrumCanvasHandle {
-  update:(data:RangeBatch|null,view:ViewBounds,onPause:()=>void,onZoom:(bounds:ViewBounds)=>void)=>void;
+  update:(data:RangeBatch|null,view:ViewBounds,onPause:()=>void,onZoom:(bounds:ViewBounds)=>void,points:MeasurePoint[],pick:((p:MeasurePoint)=>void)|undefined)=>void;
   dispose:()=>void;
 }
 
@@ -22,6 +25,7 @@ function createEngine(canvas:HTMLCanvasElement,polarization:Polarization):Engine
   let view:ViewBounds={start:0,end:300,fmin:15,fmax:85};
   let onPause=()=>{};let onZoom=(_bounds:ViewBounds)=>{void _bounds;};
   let detections:Detection[]=[];
+  let picked:MeasurePoint[]=[];let onPick:((p:MeasurePoint)=>void)|undefined;
   let disposed=false;let nextId=0;let frame:number|null=null;let textureValid=false;
   let drag:{a:Point;b:Point;view:ViewBounds;pointer:number}|null=null;
   let worker:Worker|null=null;
@@ -36,7 +40,7 @@ function createEngine(canvas:HTMLCanvasElement,polarization:Polarization):Engine
     if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)) {canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#020617';ctx.fillRect(0,0,w,h);
     ctx.imageSmoothingEnabled=false;
-    const sourceY=(85-view.fmax)/70*768, sourceH=(view.fmax-view.fmin)/70*768;
+    const {top:sourceY,height:sourceH}=frequencyCrop(view.fmin,view.fmax);
     if(textureValid&&texture.width>0&&texture.height>0)ctx.drawImage(texture,0,sourceY,texture.width,sourceH,left,top,pw,ph);
     ctx.font='11px system-ui, sans-serif';ctx.strokeStyle='rgba(148,163,184,.15)';ctx.fillStyle='#94a3b8';ctx.lineWidth=1;
     const steps=4;
@@ -59,11 +63,18 @@ function createEngine(canvas:HTMLCanvasElement,polarization:Polarization):Engine
       const [start,end]=[d.time_start!,d.time_end!];
       if(end<view.start||start>view.end)continue;
       const x=left+(start-view.start)/(view.end-view.start)*pw;
-      const fmax=85-d.bbox[1]*70, fmin=85-(d.bbox[1]+d.bbox[3])*70;
+      const fmax=FREQUENCY_MAX-d.bbox[1]*FREQUENCY_SPAN, fmin=FREQUENCY_MAX-(d.bbox[1]+d.bbox[3])*FREQUENCY_SPAN;
       const y=top+(view.fmax-fmax)/(view.fmax-view.fmin)*ph;
       ctx.strokeStyle=d.class_id===0?'#f87171':'#f8fafc';ctx.fillStyle=ctx.strokeStyle;ctx.lineWidth=1.5;
       ctx.strokeRect(x,y,(end-start)/(view.end-view.start)*pw,(fmax-fmin)/(view.fmax-view.fmin)*ph);
       ctx.textAlign='left';ctx.fillText(`${d.class} ${Math.round(d.confidence*100)}%`,x+3,Math.max(top+12,y-4));
+    }
+    if(picked.length) {
+      const ordered=[...picked].sort((a,b)=>a.time-b.time);
+      ctx.strokeStyle='#fbbf24';ctx.fillStyle='#fbbf24';ctx.lineWidth=1.5;ctx.beginPath();
+      ordered.forEach((p,i)=>{const x=left+(p.time-view.start)/(view.end-view.start)*pw,y=top+(view.fmax-p.frequency_mhz)/(view.fmax-view.fmin)*ph;if(i)ctx.lineTo(x,y);else ctx.moveTo(x,y);});ctx.stroke();
+      picked.forEach((p,i)=>{const x=left+(p.time-view.start)/(view.end-view.start)*pw,y=top+(view.fmax-p.frequency_mhz)/(view.fmax-view.fmin)*ph;
+        ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();ctx.fillText(String(i+1),x+7,y-6);});
     }
     if(drag) {
       const x=left+Math.min(drag.a.x,drag.b.x)*pw,y=top+Math.min(drag.a.y,drag.b.y)*ph;
@@ -73,6 +84,7 @@ function createEngine(canvas:HTMLCanvasElement,polarization:Polarization):Engine
     }
     ctx.restore();
     if(!data || !data.I.length) {ctx.fillStyle='#cbd5e1';ctx.textAlign='center';ctx.fillText(data?'No retained data in this range':'Loading spectrum…',left+pw/2,top+ph/2);}
+    canvas.dataset.measureCount=String(picked.length);
     canvas.dataset.start=String(view.start);canvas.dataset.end=String(view.end);
     canvas.dataset.fmin=String(view.fmin);canvas.dataset.fmax=String(view.fmax);
   }
@@ -111,7 +123,10 @@ function createEngine(canvas:HTMLCanvasElement,polarization:Polarization):Engine
   }
   function up(e:PointerEvent) {
     if(!drag||drag.pointer!==e.pointerId)return;
-    move(e);const selected=zoomRange(drag.a,drag.b,drag.view);drag=null;
+    move(e);const finished=drag;
+    const geometry=rect();const click=Math.hypot((finished.a.x-finished.b.x)*geometry.pw,(finished.a.y-finished.b.y)*geometry.ph)<=5;
+    const selected=click&&onPick?null:zoomRange(finished.a,finished.b,finished.view);drag=null;
+    if(click&&onPick&&data){const point=measurePoint(finished.a,finished.view);if(point&&canMeasurePoint(data,point))onPick(point);}
     if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
     if(selected && selected.end-selected.start>=1 && selected.fmax-selected.fmin>=.1)onZoom(selected);
     requestPaint();
@@ -122,12 +137,13 @@ function createEngine(canvas:HTMLCanvasElement,polarization:Polarization):Engine
   canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',cancel);canvas.addEventListener('keydown',key);
   const observer=new ResizeObserver(requestPaint);observer.observe(canvas);requestPaint();
   return {
-    update(next,nextView,pause,zoom) {
-      onPause=pause;onZoom=zoom;
+    update(next,nextView,pause,zoom,points,pick) {
+      onPause=pause;onZoom=zoom;onPick=pick;
+      const overlayChanged=picked!==points;picked=points;
       const changed=data!==next || JSON.stringify(view)!==JSON.stringify(nextView);
       if(JSON.stringify(view)!==JSON.stringify(nextView))textureValid=false;
       data=next;view=nextView;
-      if(changed)render();
+      if(changed)render();else if(overlayChanged)requestPaint();
     },
     setDetections(next) {detections=next;requestPaint();},
     dispose() {
@@ -138,13 +154,13 @@ function createEngine(canvas:HTMLCanvasElement,polarization:Polarization):Engine
   };
 }
 
-export const SpectrumCanvas=React.forwardRef<SpectrumCanvasHandle,Props>(({className,polarization,data,view,onPause,onZoom},ref)=>{
+export const SpectrumCanvas=React.forwardRef<SpectrumCanvasHandle,Props>(({className,polarization,data,view,onPause,onZoom,measurePoints=[],onMeasurePoint},ref)=>{
   const canvasRef=React.useRef<HTMLCanvasElement|null>(null),engine=React.useRef<Engine|null>(null);
   React.useEffect(()=>{if(!canvasRef.current)return;engine.current=createEngine(canvasRef.current,polarization);return()=>{engine.current?.dispose();engine.current=null;};},[polarization]);
-  React.useEffect(()=>{engine.current?.update(data,view,onPause,onZoom);},[data,view,onPause,onZoom]);
+  React.useEffect(()=>{engine.current?.update(data,view,onPause,onZoom,measurePoints,onMeasurePoint);},[data,view,onPause,onZoom,measurePoints,onMeasurePoint]);
   React.useImperativeHandle(ref,()=>({setDetections:(items)=>engine.current?.setDetections(items)}),[]);
   return <canvas ref={canvasRef} className={className} data-testid={`spectrum-canvas-${polarization}`}
     style={{touchAction:'none',cursor:'crosshair'}} tabIndex={0} role="img"
-    aria-label={`Stokes ${polarization==='I'?'I intensity':'V / I fraction'} spectrum. Drag to select time and frequency and pause. Escape cancels selection.`}/>;
+    aria-label={`Stokes ${polarization==='I'?'I intensity':'V / I fraction'} spectrum. ${onMeasurePoint?'Click to add measurement points. ':''}Drag to select time and frequency and pause. Escape cancels selection.`}/>;
 });
 SpectrumCanvas.displayName='SpectrumCanvas';

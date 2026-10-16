@@ -1,3 +1,17 @@
+.live-image-stack {
+  display:flex;
+  flex-direction:column;
+  gap:1rem;
+  min-width:0;
+  min-height:0;
+}
+.live-image-stack > .radio-images-panel {flex:1;}
+@media (min-width:1024px) {
+  .live-monitor-grid.measure-open {height:auto;align-items:start;}
+  .measure-open .live-spectrum-stack {height:clamp(520px,65vh,760px);position:sticky;top:1rem;}
+  .measure-open .radio-images-panel {min-height:480px;}
+}
+
 .live-monitor-grid {
   display: grid;
   gap: 1rem;

@@ -2,6 +2,8 @@ import './App.css';
 import { SpectrumCanvas } from './features/spectrum/SpectrumCanvas';
 import { useSpectrumPolling } from './features/spectrum/useSpectrum';
 import { SpectrumControls } from './features/spectrum/SpectrumControls';
+import {MeasurementPanel} from './features/spectrum/MeasurementPanel';
+import {useMeasurement} from './features/spectrum/useMeasurement';
 import { useDetectionsPolling } from './features/detections/useDetections';
 import { RadioImagesPanel } from './features/images/RadioImagesPanel';
 import { ObservationInfo } from './components/ObservationInfo';
@@ -27,6 +29,8 @@ import {
 
 function App() {
   const spectrum = useSpectrumPolling();
+  const measurement=useMeasurement(spectrum.measuring);
+  const closeMeasurement=()=>{measurement.clear();spectrum.endMeasurement();};
   const detections = useDetectionsPolling();
   const intensityRef =
     React.useRef<SpectrumCanvasHandle | null>(null);
@@ -41,10 +45,8 @@ function App() {
     React.useState<SunEphemeris | null>(null);
 
   React.useEffect(() => {
-    intensityRef.current?.setDetections(
-      detections.detections,
-    );
-  }, [detections.detections]);
+    if(!spectrum.measuring)intensityRef.current?.setDetections(detections.detections);
+  }, [detections.detections,spectrum.measuring]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -152,7 +154,7 @@ function App() {
 
         <SpectrumControls spectrum={spectrum} />
 
-        <section aria-label="Live spectra and solar images" className="live-monitor-grid">
+        <section aria-label="Live spectra and solar images" className={`live-monitor-grid ${spectrum.measuring?'measure-open':''}`}>
           <section aria-label="Live Stokes I and V spectra" className="live-spectrum-stack grid min-w-0 gap-4">
             <section aria-labelledby="intensity-title" className="live-spectrum-panel overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
@@ -163,7 +165,7 @@ function App() {
                   <span>3×10³</span><span>Log · s.f.u.</span>
                 </div>
               </div>
-              <SpectrumCanvas ref={intensityRef} data={spectrum.data} view={spectrum.view} onPause={spectrum.pause} onZoom={spectrum.zoom} polarization="I" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
+              <SpectrumCanvas ref={intensityRef} data={spectrum.data} view={spectrum.view} onPause={spectrum.pause} onZoom={spectrum.zoom} measurePoints={measurement.points} onMeasurePoint={spectrum.measuring&&!spectrum.snapshotLoading?measurement.addPoint:undefined} polarization="I" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
             </section>
             <section aria-labelledby="circular-title" className="live-spectrum-panel overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
@@ -174,11 +176,14 @@ function App() {
                   <span>+0.6</span><span>Linear · V / I</span>
                 </div>
               </div>
-              <SpectrumCanvas data={spectrum.data} view={spectrum.view} onPause={spectrum.pause} onZoom={spectrum.zoom} polarization="V" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
+              <SpectrumCanvas data={spectrum.data} view={spectrum.view} onPause={spectrum.pause} onZoom={spectrum.zoom} measurePoints={measurement.points} onMeasurePoint={spectrum.measuring&&!spectrum.snapshotLoading?measurement.addPoint:undefined} polarization="V" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
             </section>
           </section>
 
-          <RadioImagesPanel />
+          <div className="live-image-stack">
+            <MeasurementPanel spectrum={spectrum} tool={measurement} onClose={closeMeasurement}/>
+            <RadioImagesPanel />
+          </div>
         </section>
 
 

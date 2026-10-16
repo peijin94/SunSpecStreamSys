@@ -12,6 +12,7 @@ import sqlite3
 import uuid
 import struct
 from spectrum_time import time_raster, source_box
+from spectrum_measure import measure_spectrum
 from spectrum_prefill import load_npz_history
 from spectrum_ai import CodexSpectrumClient, SpectrumSummaryError, render_ai_spectrum, DEFAULT_MODEL
 from spectrum_history import (HISTORY_SECONDS, RECENT_FRAMES, validate_range,
@@ -1019,6 +1020,19 @@ class StreamReceiver:
                 if format != 'json':
                     raise HTTPException(status_code=400, detail='Unknown spectrum format')
                 return JSONResponse(self.get_spectrum_snapshot(since, boot_id, limit, before), headers=headers)
+
+            @app.post('/spectrum-measure')
+            async def spectrum_measure(request: Request):
+                body=bytearray()
+                async for chunk in request.stream():
+                    body.extend(chunk)
+                    if len(body)>32768:
+                        raise HTTPException(status_code=413,detail='Measurement request exceeds 32 KiB')
+                try:
+                    result=measure_spectrum(json.loads(body))
+                except (ValueError,UnicodeDecodeError,RecursionError) as exc:
+                    raise HTTPException(status_code=400,detail=str(exc)) from None
+                return JSONResponse(result,headers={'Cache-Control':'no-store'})
 
             @app.get('/spectrum-range')
             def get_spectrum_range(seconds: float = Query(300, ge=1, le=3600),

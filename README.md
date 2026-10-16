@@ -88,6 +88,56 @@ wall-clock arrival time. A deployment can hand off raw I/V and Unix timestamps i
 `<plot_dir>/restart-snapshot.npz`; the receiver validates freshness and consumes
 it once. The detector/AI still receive only the recent 600-frame analysis window.
 
+### Interactive spectrum measure
+
+The compact **Interactive spectrum measure** button is above the live solar images.
+Opening it pauses both spectra immediately, aborts live requests, and captures up to
+one hour of native paired I/V integrations pinned to the displayed receiver boot
+and sequence. The private browser snapshot is immutable: zoom, Zoom out, presets,
+UTC bounds and explicit frequency limits operate on that snapshot, without reading
+new live samples. Play and Live are locked until the panel closes; closing leaves
+the display paused until the user explicitly resumes it. Stream ingestion and
+other browsers continue normally. A failed history capture is reported rather than
+silently substituting newer data.
+
+Click either spectrum to mark a feature (2–128 points); drag still selects a zoom
+rectangle. Markers are shared across I and V/I, with a UTC/MHz/radius point table,
+Undo, individual removal and Clear. Blank integrations cannot be picked. Both the
+rendered frequency crop and sample validation use the actual four-channel-averaged
+correlator grid: raw channels `[600, 3672)` at `196/8192` MHz/channel. The 15–85 MHz
+viewport crops those data rather than stretching the entire 768-bin array into it.
+
+`POST /live/spectrum-measure` (or `/spectrum-measure` directly on the receiver):
+
+```json
+{"points": [[1792160000, 60], [1792160010, 50], [1792160020, 40]], "model": "saito77", "harmonic": 1, "density_scale": 1}
+```
+
+Times are Unix UTC seconds; frequencies are MHz. `model` also accepts `leblanc98`
+and `newkirk`; `harmonic` is 1 (fundamental) or 2; the density multiplier spans
+0.01–100. The stateless, CPU-only calculation sorts points by time and returns:
+
+- `points`: time, `frequency_mhz`, inferred heliocentric `r_sun`;
+- `segments`: midpoint `time`, `duration_s`, mean frequency/radius,
+  signed `drift_mhz_s`, signed `radial_velocity_km_s`, and nonnegative `speed_km_s`;
+- selected model options, `solar_radius_km`, `method`, `reference_commit`,
+  `assumptions`, and `warnings`.
+
+The panel plots **df/dt (MHz/s) versus UTC time**, and **source speed (km/s) versus
+heliocentric radius (R☉)**. Each estimate is an adjacent-point secant, not a fitted
+or smoothed derivative: `df/dt = Δf/Δt`, `v_radial = 696000 × Δr/Δt`.
+The density/frequency relations follow PhySynthTrainer commit
+`6e20e0c6636557ef8032d4d9a03287273ea886d8`, with `f = h × 8.93e-3 √(k n_e)` MHz.
+The monotonic inversion is bounded to 1–100 R☉. These are **model-dependent radial
+estimates**, without projection, propagation or light-travel-time corrections;
+R☉ is distance from the centre, not height above the photosphere. Superluminal
+inferences are flagged, not silently clipped.
+
+Requests are limited to 32 KiB and 128 points; malformed inputs, duplicate or
+sub-microsecond times and model-out-of-domain frequencies return 400, oversized
+bodies return 413. Responses use `Cache-Control: no-store`. Measurement requests
+never mutate the receiver, archives, other clients or AI interpretation.
+
 ### Cold-start history from NPZ
 
 If no valid deployment handoff populated the buffer, startup reads the configured
