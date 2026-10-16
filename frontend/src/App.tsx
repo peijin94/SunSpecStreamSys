@@ -1,7 +1,7 @@
 import './App.css';
 import { SpectrumCanvas } from './features/spectrum/SpectrumCanvas';
 import { useSpectrumPolling } from './features/spectrum/useSpectrum';
-import { submitSpectrumBatch } from './features/spectrum/spectrumRenderer';
+import { SpectrumControls } from './features/spectrum/SpectrumControls';
 import { useDetectionsPolling } from './features/detections/useDetections';
 import { RadioImagesPanel } from './features/images/RadioImagesPanel';
 import { ObservationInfo } from './components/ObservationInfo';
@@ -25,7 +25,7 @@ import {
 import { Gemini } from '@lobehub/icons';
 
 function App() {
-  const spectrum = useSpectrumPolling(submitSpectrumBatch);
+  const spectrum = useSpectrumPolling();
   const detections = useDetectionsPolling();
   const intensityRef =
     React.useRef<SpectrumCanvasHandle | null>(null);
@@ -150,6 +150,8 @@ function App() {
 
         <ObservationInfo elevation={sunEph?.el ?? null} />
 
+        <SpectrumControls spectrum={spectrum} />
+
         <section aria-label="Live spectra and solar images" className="live-monitor-grid">
           <section aria-label="Live Stokes I and V spectra" className="live-spectrum-stack grid min-w-0 gap-4">
             <section aria-labelledby="intensity-title" className="live-spectrum-panel overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
@@ -161,7 +163,7 @@ function App() {
                   <span>3×10³</span><span>Log · s.f.u.</span>
                 </div>
               </div>
-              <SpectrumCanvas ref={intensityRef} polarization="I" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
+              <SpectrumCanvas ref={intensityRef} data={spectrum.data} view={spectrum.view} onPause={spectrum.pause} onZoom={spectrum.zoom} polarization="I" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
             </section>
             <section aria-labelledby="circular-title" className="live-spectrum-panel overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
@@ -172,14 +174,14 @@ function App() {
                   <span>+0.6</span><span>Linear · V / I</span>
                 </div>
               </div>
-              <SpectrumCanvas polarization="V" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
+              <SpectrumCanvas data={spectrum.data} view={spectrum.view} onPause={spectrum.pause} onZoom={spectrum.zoom} polarization="V" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
             </section>
           </section>
 
           <RadioImagesPanel />
         </section>
 
-        {spectrum.historyLoading && <p role="status" className="text-xs text-slate-400">Loading earlier history… live data continues updating.</p>}
+
 
         <section aria-label="Observation status, flagging map, imaging status, events, and AI summary" className="grid min-w-0 items-start gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
           <AntennaFlagsCard />
@@ -211,7 +213,7 @@ function App() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">
-                  Frames received
+                  Samples in selected range
                 </span>
                 <span>{spectrum.frameCount}</span>
               </div>

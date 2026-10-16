@@ -31,7 +31,7 @@ export function decodeSpectrum(buffer: ArrayBuffer): SpectrumBatch {
   const { rows, bins } = metadata;
   if (
     metadata.schema !== 'lwa-spectrum-iv-v1' || bins !== 768 ||
-    !Number.isInteger(rows) || rows < 0 || rows > 600 ||
+    !Number.isInteger(rows) || rows < 0 || rows > (metadata.range === true ? 1200 : 600) ||
     metadata.byteorder !== 'little' || metadata.dtype !== 'float32' ||
     metadata.order?.join(',') !== 'I,V' ||
     !Number.isSafeInteger(metadata.sequence) || typeof metadata.boot_id !== 'string' ||

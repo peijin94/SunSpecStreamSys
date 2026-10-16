@@ -22,8 +22,13 @@ The ZeroMQ payload has shape `(1, 3072, 4)`, ordered as XX, YY, Re(XY), Im(XY).
 The receiver preserves its existing convention, `I = (XX + YY) / 2` and
 `V = Im(XY)`, then averages each group of four frequency channels into 768 bins.
 Both polarizations and the source UTC timestamp are published under one lock.
-Spectra use a 600-frame memory ring and NPZ archives; SQLite `visitors.db` stores
-visitor counts. Spectrum history in the browser is a five-minute window.
+Spectra use a one-hour memory ring (7201 paired frames at the configured 0.5 s
+cadence, with a 3600-second source-time cutoff). SQLite `visitors.db` stores
+visitor counts. The browser initially shows five minutes; **Live** resets to
+three minutes and the full frequency band. NPZ archiving remains one chunk per
+600 **newly acquired** frames (~5 minutes), independently of ring wrap. Paired
+I/V and chronological MJD timestamps are copied atomically for each archive;
+restored deployment-handoff frames do not count as new archive frames.
 
 The frontend displays aligned Stokes I and V/I panels. I is converted from Jy
 to s.f.u. as `I / 1e4` and uses the exact 256-entry Viridis color map with a
@@ -54,18 +59,34 @@ to eight bytes, float64 Unix timestamps, float32 I rows, then float32 V rows.
 Header fields include `rows`, `bins`, `dtype`, `byteorder`, and `order`.
 Responses support gzip and use `Cache-Control: no-store`.
 
-Rendering uses one shared Web Worker for both panel rasters, color lookup tables,
-and transfers only changed pixel spans to reusable Canvas textures. The first
-request contains 64 recent frames; older history loads in small pages while
-incremental live requests continue. One animation callback paints both panels when
-data or size changes; idle spectra do not redraw. Polls never overlap, pause
-for hidden tabs, and catch up when the tab becomes visible. Half-second raster
-columns cover normal approximately 0.514-second integrations; longer gaps
-remain black. Refresh retains the displayed history and existing cursor, and
-fetches only new frames. The time axis shows source UTC rather than wall-clock
-arrival time. A deployment can hand off raw I/V and Unix timestamps in
+The interactive browser uses `GET /spectrum-range?seconds=300&max_rows=1200`.
+It requests only the selected range, not all retained history. The 3/5-minute
+views retain native integrations and then fetch cursor deltas at ~0.5 s cadence.
+10-minute/30-minute/1-hour presets request at most 600 UTC-aligned time bins (~1/3/6 s),
+refreshed every 5 s. I and V are averaged separately before computing V/I;
+empty bins and real recording gaps stay black. A frozen selection uses explicit
+Unix `start`/`end` parameters, with a maximum duration of 3600 s. `format=binary`
+(default) uses the same aligned paired protocol; `format=json` is also supported.
+Range metadata includes `display_start/end`, `coverage_start/end`, `bin_seconds`,
+`native_cadence_seconds`, `integration_seconds`, `raw_rows`, `range: true`, and `history_seconds: 3600`.
+The API validates finite/increasing bounds and limits responses to 1200 rows.
+
+Drag a time-frequency rectangle on either spectrum to pause immediately and
+zoom both panels. The selected range is fetched again at its finer resolution.
+Pause aborts in-flight spectrum requests and prevents late responses from moving
+the frozen axes. Play resumes a rolling view of the selected width; Live resets
+to three minutes and full band. Reset zoom restores the last chosen preset.
+A keyboard-accessible UTC From/To form selects an exact interval, including
+across midnight. The UI reports available coverage and a warming buffer; history
+is not invented for times before startup or during stream gaps.
+
+Each panel uses a Web Worker for bounded source-time raster/color rendering and
+an event-driven reusable Canvas texture; a synchronous fallback works without
+Worker support. Polls never overlap and stop for hidden tabs. Paused selections
+do not refresh on visibility changes. The time axis uses source UTC rather than
+wall-clock arrival time. A deployment can hand off raw I/V and Unix timestamps in
 `<plot_dir>/restart-snapshot.npz`; the receiver validates freshness and consumes
-it once, preserving the live window across the restart.
+it once. The detector/AI still receive only the recent 600-frame analysis window.
 
 Type III detection uses a cached YOLO model with confidence threshold 0.55
 (previously 0.60), retaining IoU 0.60 and a five-second inference interval.
@@ -81,12 +102,19 @@ source UTC, so inference or download delays do not shift them.
 Validate changes with the receiver's Python environment and Node 20:
 
 ```bash
-python -m unittest discover -s tests -p test_polarization_api.py -v
+python -m unittest discover -s tests -v
 cd frontend
 npm test
 npm run build
 npm run lint
 ```
+
+Browser acceptance scripts are `frontend/tests/live-browser.cjs` and
+`frontend/tests/paused-range-race.cjs`. They exercise the public page read-only,
+including desktop/mobile, Worker fallback, and a deliberately delayed-request
+race. Set `LWA_TEST_URL` for staging, `PLAYWRIGHT_MODULE` to an installed
+`playwright-core` module path, `BROWSER_EXECUTABLE` to Chrome/Chromium if needed,
+and `LWA_TEST_OUTPUT` to a temporary screenshot/report directory.
 
 The older examples below describe historical plotting options; use the current
 receiver's `--help` for supported command-line flags.

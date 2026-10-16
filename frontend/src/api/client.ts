@@ -57,6 +57,17 @@ export async function fetchSpectrumHistory(bootId: string, before: number, signa
   return decodeSpectrum(await res.arrayBuffer());
 }
 
+export async function fetchSpectrumRange(query: string, signal?: AbortSignal) {
+  const res = await fetch(buildUrl(`/spectrum-range?${query}`), { signal });
+  if (!res.ok) throw new Error(`Spectrum range failed: ${res.status}`);
+  const data = decodeSpectrum(await res.arrayBuffer());
+  const range = data as import('../features/spectrum/rangeModel').RangeBatch;
+  if (range.range !== true || !Number.isFinite(range.display_start) ||
+      !Number.isFinite(range.display_end) || range.display_end <= range.display_start ||
+      range.display_end-range.display_start > 3600.001) throw new Error('Invalid selected spectrum range');
+  return range;
+}
+
 export interface RefreshResponse {
   data: SpectrumFrame[];
   buffer_length: number;

@@ -12,6 +12,8 @@ import sqlite3
 import uuid
 import struct
 from spectrum_time import time_raster, source_box
+from spectrum_history import (HISTORY_SECONDS, RECENT_FRAMES, validate_range,
+                              average_time_bins, json_rows, encode_binary)
 from radio_images import RadioImageCache, FREQUENCIES as IMAGE_FREQUENCIES
 from antenna_flags import AntennaFlagCache
 from imaging_status import ImagingStatusCache
@@ -77,11 +79,14 @@ class StreamReceiver:
     Connects to ZMQ stream, processes data, and maintains a ring buffer.
     """
     
-    def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=600, gc_interval=100, 
+    def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=None, gc_interval=100,
                  start_webshow=False, streaming_interval=0.5, verbose=False, plot_dir='./figs/', save_dir='./stream_spec_npz/', save_all_to_file=True):
         self.stream_addr = stream_addr
         self.stream_port = stream_port
-        self.buffer_length = buffer_length
+        if not np.isfinite(streaming_interval) or streaming_interval <= 0:
+            raise ValueError('streaming_interval must be positive and finite')
+        self.buffer_length = int(np.ceil(HISTORY_SECONDS / streaming_interval)) + 1 if buffer_length is None else buffer_length
+        self.archive_frames = 0  # Restored handoff frames are not newly acquired archive frames.
         self.gc_interval = gc_interval  # Garbage collection interval
         self.start_webshow = start_webshow # Flag to start web server
         self.streaming_interval = streaming_interval  # Streaming interval in seconds per frame
@@ -212,8 +217,8 @@ class StreamReceiver:
                 self.log.info("Sun is down, not saving data")
                 return
 
-        latest_data, mjd_data = self.get_latest_data(n_frames=self.buffer_length, pol='I')
-        latest_data_v = self.get_latest_data(n_frames=self.buffer_length, pol='V')[0]
+        _, latest_data, latest_data_v, timestamps = self._get_spectrum_arrays(limit=RECENT_FRAMES)
+        mjd_data = (timestamps / 86400.0 + 40587.0)[:, None]
 
         # create 3-dim array with shape (*latest_data.shape, 2)
         data_out = np.zeros((*latest_data.shape, 2), dtype=np.float32)
@@ -224,7 +229,7 @@ class StreamReceiver:
         freq_upper = 196*((600+3072-1)/8192)
         freq_array = np.linspace(freq_lower, freq_upper, data_out.shape[1])
 
-        np.savez(f'{save_dir}/{filename}', data=data_out/norm_factor, mjd=self.ring_arr_mjd, freq=freq_array)
+        np.savez(f'{save_dir}/{filename}', data=data_out/norm_factor, mjd=mjd_data, freq=freq_array)
         self.log.info(f"Latest data saved to {save_dir}/{filename}")
         return f'{save_dir}/{filename}'
 
@@ -575,8 +580,10 @@ class StreamReceiver:
                 self.log.debug(f"Processed frame: buffer_index={self.buffer_index}, delay={self.delay:.3f}s")
             
 
-            # save all when buffer_index everytime when length-1
-            if self.save_all_to_file and self.buffer_index == self.buffer_length - 1:
+            # Archiving cadence is independent of the one-hour display ring.
+            self.archive_frames = getattr(self, 'archive_frames', 0) + 1
+            if self.save_all_to_file and self.archive_frames >= RECENT_FRAMES:
+                self.archive_frames = 0
                 
                 time_now_iso_str = Time.now().iso[:19].replace(' ', '_').replace(':', '_')
                 date_now_str = Time.now().iso[:10].replace(' ', '_').replace(':', '_')
@@ -799,10 +806,8 @@ class StreamReceiver:
         numpy.ndarray
             Latest data with shape (n_frames, 1536)
         """
-        if n_frames > self.buffer_length:
-            n_frames = self.buffer_length
-        
         with self.buffer_lock:
+            n_frames = min(max(0, n_frames), self.buffer_length, self.frames_received)
             indices = (np.arange(self.buffer_index - n_frames,
                                  self.buffer_index) % self.buffer_length)
             if pol == 'I':
@@ -819,10 +824,10 @@ class StreamReceiver:
             sequence = self.frames_received
             available = min(sequence, self.buffer_length)
             oldest = sequence - available + 1
-            limit = self.buffer_length if limit is None else min(self.buffer_length, max(1, limit))
+            limit = min(self.buffer_length, RECENT_FRAMES) if limit is None else min(self.buffer_length, RECENT_FRAMES, max(1, limit))
             history = before is not None and boot_id == self.boot_id
             reset = not history and (since is None or boot_id != self.boot_id or since < 0
-                                     or since > sequence or sequence - since > available)
+                                     or since > sequence or sequence - since > min(available, limit))
             end = min(before, sequence) if history else sequence
             count = max(0, min(limit, end - oldest + 1)) if history or reset else sequence - since
             first = end - count + 1
@@ -845,6 +850,65 @@ class StreamReceiver:
             'buffer_index': index, 'timestamp': time.time(),
         }
         return metadata, intensity, circular, (times - 40587.0) * 86400.0
+
+    def _get_range_arrays(self, seconds=300, start=None, end=None, max_rows=1200,
+                          since=None, boot_id=None):
+        """Copy only the requested one-hour source-time window under the ingest lock."""
+        validate_range(seconds, start, end, max_rows)
+        relative = start is None
+        with self.buffer_lock:
+            sequence = self.frames_received
+            available = min(sequence, self.buffer_length)
+            indices = (np.arange(self.buffer_index-available, self.buffer_index) % self.buffer_length)
+            all_times = (self.ring_arr_mjd[indices, 0]-40587.0)*86400.0
+            valid = np.isfinite(all_times) & (all_times > 0)
+            latest = float(all_times[valid][-1]) if np.any(valid) else None
+            valid &= all_times >= ((latest-HISTORY_SECONDS) if latest is not None else 0)
+            retained = all_times[valid]
+            coverage_start = float(retained[0]) if len(retained) else None
+            coverage_end = float(retained[-1]) if len(retained) else None
+            if relative:
+                end = latest if latest is not None else time.time()
+                start = end-seconds
+            differences = np.diff(retained[-20:])
+            differences = differences[(differences > 0) & (differences < 2)]
+            cadence = float(np.median(differences)) if len(differences) else float(getattr(self, 'streaming_interval', .5))
+            selected = valid & (all_times >= start-1e-6) & (all_times <= end+1e-6)
+            raw_rows = int(np.count_nonzero(selected))
+            native = (end-start) <= 300 and raw_rows <= max_rows
+            sequences = np.arange(sequence-available+1, sequence+1)
+            first_retained = int(sequences[valid][0]) if np.any(valid) else sequence+1
+            reset = (not relative or not native or since is None or boot_id != self.boot_id
+                     or since < first_retained-1 or since > sequence
+                     or sequence-since > max_rows
+                     or (since is not None and raw_rows and since < int(sequences[selected][0])-1))
+            if not reset:
+                selected &= sequences > since
+            chosen = indices[selected]
+            intensity = self.ring_buffer[chosen].copy()
+            circular = self.ring_buffer_v[chosen].copy()
+            times = all_times[selected].copy()
+            selected_sequences = sequences[selected]
+            index = self.buffer_index
+        bin_seconds = 0
+        if not native and len(times):
+            intensity, circular, times, bin_seconds = average_time_bins(
+                intensity, circular, times, start, end, max_rows)
+        metadata = {
+            'range': True, 'reset': reset, 'sequence': sequence, 'boot_id': self.boot_id,
+            'first_sequence': int(selected_sequences[0]) if len(selected_sequences) else None,
+            'display_start': float(start), 'display_end': float(end),
+            'coverage_start': coverage_start, 'coverage_end': coverage_end,
+            'native_cadence_seconds': cadence, 'bin_seconds': bin_seconds,
+            'integration_seconds': min(cadence, float(getattr(self, 'streaming_interval', .5))*1.05),
+            'raw_rows': raw_rows, 'history_seconds': HISTORY_SECONDS,
+            'buffer_length': self.buffer_length, 'buffer_index': index, 'timestamp': time.time(),
+        }
+        return metadata, intensity, circular, times
+
+    def get_spectrum_range(self, **kwargs):
+        metadata, intensity, circular, times = self._get_range_arrays(**kwargs)
+        return dict(metadata, I=json_rows(intensity), V=json_rows(circular), timestamps=times.tolist())
 
     def get_spectrum_snapshot(self, since=None, boot_id=None, limit=None, before=None):
         metadata, intensity, circular, times = self._get_spectrum_arrays(since, boot_id, limit, before)
@@ -937,6 +1001,25 @@ class StreamReceiver:
                     raise HTTPException(status_code=400, detail='Unknown spectrum format')
                 return JSONResponse(self.get_spectrum_snapshot(since, boot_id, limit, before), headers=headers)
 
+            @app.get('/spectrum-range')
+            def get_spectrum_range(seconds: float = Query(300, ge=1, le=3600),
+                                   start: float = None, end: float = None,
+                                   max_rows: int = Query(1200, ge=16, le=1200),
+                                   since: int = Query(None, ge=0), boot_id: str = None,
+                                   format: str = 'binary'):
+                if format not in ('binary', 'json'):
+                    raise HTTPException(status_code=400, detail='Unknown spectrum format')
+                try:
+                    arrays = self._get_range_arrays(seconds, start, end, max_rows, since, boot_id)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc))
+                metadata, intensity, circular, times = arrays
+                headers = {'Cache-Control': 'no-store'}
+                if format == 'binary':
+                    return Response(encode_binary(*arrays), media_type='application/octet-stream', headers=headers)
+                return JSONResponse(dict(metadata, I=json_rows(intensity), V=json_rows(circular),
+                                         timestamps=times.tolist()), headers=headers)
+
             @app.get('/radio-images')
             def get_radio_images():
                 return JSONResponse(self.radio_images.metadata(), headers={'Cache-Control': 'no-store'})
@@ -982,7 +1065,7 @@ class StreamReceiver:
                 return JSONResponse(response_data)
 
             @app.get("/refresh")
-            async def refresh_data(n_frames: int = 600):
+            async def refresh_data(n_frames: int = Query(600, ge=1, le=600)):
                 if self.frames_received > 0:
                     latest_data = self.get_latest_data(n_frames=n_frames)[0]
                     if latest_data.size > 0:
@@ -1163,8 +1246,8 @@ def main():
                        help='Stream address (default: 127.0.0.1)')
     parser.add_argument('--port', type=int, default=30002,
                        help='Stream port (default: 30002)')
-    parser.add_argument('--buffer-length', type=int, default=600,
-                       help='Ring buffer length (default: 600)')
+    parser.add_argument('--buffer-length', type=int, default=None,
+                       help='Ring capacity override (default: one hour at streaming-interval cadence)')
     parser.add_argument('--gc-interval', type=int, default=100,
                        help='Garbage collection interval in frames (default: 100)')
     parser.add_argument('--log-level', type=str, default='INFO',
