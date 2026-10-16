@@ -19,7 +19,7 @@ class LunaSummaryTests(unittest.TestCase):
                 'Path(sys.argv[0]+".env").write_text(json.dumps({k:k in os.environ for k in ["GEMINI_API_KEY","OPENAI_API_KEY","HOME"]}))\n'+
                 'Path(sys.argv[sys.argv.index("--output-last-message")+1]).write_text(json.dumps({"summary":"Fixture summary: no model was called in this unit test."}))\n')
             cli.chmod(0o700)
-            client=CodexSpectrumClient(executable=str(cli),work_dir=root,timeout=5)
+            client=CodexSpectrumClient(executable=str(cli),work_dir=os.path.relpath(root,Path.cwd()),timeout=5)
             text=client.describe(image,'Describe this test spectrum.')
             self.assertIn('Fixture summary',text)
             args=json.loads(Path(str(cli)+'.args').read_text())

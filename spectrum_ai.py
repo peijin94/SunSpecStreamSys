@@ -15,7 +15,7 @@ class CodexSpectrumClient:
     def __init__(self, executable=None, model=DEFAULT_MODEL, timeout=45.0, work_dir=None):
         self.executable=executable or os.environ.get('LWA_CODEX_EXECUTABLE','codex')
         self.model=model;self.timeout=timeout
-        self.work_dir=Path(work_dir) if work_dir is not None else Path.home()/'.cache/lwa-spectrum-ai'
+        self.work_dir=(Path(work_dir) if work_dir is not None else Path.home()/'.cache/lwa-spectrum-ai').resolve()
 
     def describe(self, image_path, prompt):
         image=Path(image_path).resolve(strict=True)
