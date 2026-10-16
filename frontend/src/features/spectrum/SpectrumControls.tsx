@@ -1,5 +1,6 @@
 import * as React from 'react';
 import type {useSpectrumPolling} from './useSpectrum';
+import { IS_PUBLIC } from '../../lib/appMode';
 
 type Props={spectrum:ReturnType<typeof useSpectrumPolling>};
 const time=(value:number)=>new Date(value*1000).toISOString().replace('T',' ').slice(0,19);
@@ -7,6 +8,8 @@ export function SpectrumControls({spectrum:s}:Props) {
  const [from,setFrom]=React.useState(''),[to,setTo]=React.useState(''),[error,setError]=React.useState('');
  const [minimum,setMinimum]=React.useState('15'),[maximum,setMaximum]=React.useState('85'),[frequencyError,setFrequencyError]=React.useState('');
  const data=s.data;
+ // Public fixed page has no preset/custom time/frequency/zoom/pause/play/live controls.
+ if (IS_PUBLIC) return null;
  const available=data?.coverage_start!==null && data?.coverage_start!==undefined && data.coverage_end!==null
    ? Math.max(0,data.coverage_end-data.coverage_start):0;
  const stale=data?.coverage_end?data.timestamp-data.coverage_end>10:false;

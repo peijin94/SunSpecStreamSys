@@ -11,13 +11,15 @@ interface Props {
   className?:string; polarization:Polarization; data:RangeBatch|null; view:ViewBounds;
   onPause:()=>void; onZoom:(bounds:ViewBounds)=>void;
   measurePoints?:MeasurePoint[];onMeasurePoint?:(point:MeasurePoint)=>void;
+  /** Public fixed page passes false: canvas renders only, no pointer/keyboard zoom/pick. */
+  interactive?:boolean;
 }
 interface Engine extends SpectrumCanvasHandle {
   update:(data:RangeBatch|null,view:ViewBounds,onPause:()=>void,onZoom:(bounds:ViewBounds)=>void,points:MeasurePoint[],pick:((p:MeasurePoint)=>void)|undefined)=>void;
   dispose:()=>void;
 }
 
-function createEngine(canvas:HTMLCanvasElement,polarization:Polarization):Engine {
+function createEngine(canvas:HTMLCanvasElement,polarization:Polarization,interactive = true):Engine {
   const ctx=canvas.getContext('2d',{alpha:false})!;
   const texture=document.createElement('canvas');
   const tctx=texture.getContext('2d',{alpha:false})!;
@@ -111,18 +113,18 @@ function createEngine(canvas:HTMLCanvasElement,polarization:Polarization):Engine
     return {x:(e.clientX-r.left-p.left)/p.pw,y:(e.clientY-r.top-p.top)/p.ph};
   };
   function down(e:PointerEvent) {
-    if(!data||e.button!==0||drag)return;
+    if(!interactive||!data||e.button!==0||drag)return;
     const p=position(e);if(p.x<0||p.x>1||p.y<0||p.y>1)return;
     e.preventDefault();canvas.setPointerCapture(e.pointerId);
     drag={a:p,b:p,view:{...view},pointer:e.pointerId};
     onPause();requestPaint();
   }
   function move(e:PointerEvent) {
-    if(!drag||drag.pointer!==e.pointerId)return;
+    if(!interactive||!drag||drag.pointer!==e.pointerId)return;
     const p=position(e);drag.b={x:Math.max(0,Math.min(1,p.x)),y:Math.max(0,Math.min(1,p.y))};requestPaint();
   }
   function up(e:PointerEvent) {
-    if(!drag||drag.pointer!==e.pointerId)return;
+    if(!interactive||!drag||drag.pointer!==e.pointerId)return;
     move(e);const finished=drag;
     const geometry=rect();const click=Math.hypot((finished.a.x-finished.b.x)*geometry.pw,(finished.a.y-finished.b.y)*geometry.ph)<=5;
     const selected=click&&onPick?null:zoomRange(finished.a,finished.b,finished.view);drag=null;
@@ -154,13 +156,16 @@ function createEngine(canvas:HTMLCanvasElement,polarization:Polarization):Engine
   };
 }
 
-export const SpectrumCanvas=React.forwardRef<SpectrumCanvasHandle,Props>(({className,polarization,data,view,onPause,onZoom,measurePoints=[],onMeasurePoint},ref)=>{
+export const SpectrumCanvas=React.forwardRef<SpectrumCanvasHandle,Props>(({className,polarization,data,view,onPause,onZoom,measurePoints=[],onMeasurePoint,interactive=true},ref)=>{
   const canvasRef=React.useRef<HTMLCanvasElement|null>(null),engine=React.useRef<Engine|null>(null);
-  React.useEffect(()=>{if(!canvasRef.current)return;engine.current=createEngine(canvasRef.current,polarization);return()=>{engine.current?.dispose();engine.current=null;};},[polarization]);
-  React.useEffect(()=>{engine.current?.update(data,view,onPause,onZoom,measurePoints,onMeasurePoint);},[data,view,onPause,onZoom,measurePoints,onMeasurePoint]);
+  React.useEffect(()=>{if(!canvasRef.current)return;engine.current=createEngine(canvasRef.current,polarization,interactive);return()=>{engine.current?.dispose();engine.current=null;};},[polarization,interactive]);
+  // Non-interactive (public) canvases never expose picking: force pick to undefined.
+  const pick = interactive ? onMeasurePoint : undefined;
+  React.useEffect(()=>{engine.current?.update(data,view,interactive?onPause:()=>{},interactive?onZoom:()=>{},measurePoints,pick);},[data,view,onPause,onZoom,measurePoints,pick,interactive]);
   React.useImperativeHandle(ref,()=>({setDetections:(items)=>engine.current?.setDetections(items)}),[]);
   return <canvas ref={canvasRef} className={className} data-testid={`spectrum-canvas-${polarization}`}
-    style={{touchAction:'none',cursor:'crosshair'}} tabIndex={0} role="img"
-    aria-label={`Stokes ${polarization==='I'?'I intensity':'V / I fraction'} spectrum. ${onMeasurePoint?'Click to add measurement points. ':''}Drag to select time and frequency and pause. Escape cancels selection.`}/>;
+    data-interactive={String(interactive)}
+    style={interactive?{touchAction:'none',cursor:'crosshair'}:{touchAction:'auto',cursor:'default'}} tabIndex={interactive?0:-1} role="img"
+    aria-label={`Stokes ${polarization==='I'?'I intensity':'V / I fraction'} spectrum.${interactive?` ${onMeasurePoint?'Click to add measurement points. ':''}Drag to select time and frequency and pause. Escape cancels selection.`:' Fixed live display; interaction disabled.'}`}/>;
 });
 SpectrumCanvas.displayName='SpectrumCanvas';

@@ -1,3 +1,4 @@
+import { buildApiUrl } from '../lib/basePath';
 import type { Detection } from './detectionProtocol';
 import { parseAntennaFlags } from './antennaProtocol';
 import { parseImagingStatus } from './imagingProtocol';
@@ -8,17 +9,14 @@ export type { PolarizedFrame, SpectrumBatch, SpectrumCursor } from './spectrumPr
 const DEFAULT_API_BASE =
   import.meta.env.VITE_API_BASE_URL ?? '';
 
-// Use Vite's BASE_URL so that in production we automatically
-// prefix with /live/, while in dev it stays at /
+// Use Vite's BASE_URL so production builds automatically prefix API/image
+// requests with VITE_BASE_PATH (/live/ for public, /live-dev/ for dev),
+// while local dev stays at /. VITE_API_BASE_URL optionally prepends an origin.
 const deploymentBase =
   import.meta.env.BASE_URL ?? '/';
 
 function buildUrl(path: string): string {
-  const base = DEFAULT_API_BASE.replace(/\/$/, '');
-  const prefix = deploymentBase.replace(/\/$/, '');
-  const p = `${prefix}${path}`.replace(/\/{2,}/g, '/');
-  if (!base) return p;
-  return `${base}${p.startsWith('/') ? p : `/${p}`}`;
+  return buildApiUrl(path, deploymentBase, DEFAULT_API_BASE);
 }
 
 export async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {

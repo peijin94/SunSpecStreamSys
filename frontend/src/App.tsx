@@ -26,10 +26,13 @@ import {
   type SunEphemeris,
   type AiSummaryResponse,
 } from './api/client';
+import { IS_PUBLIC } from './lib/appMode';
 
 function App() {
   const spectrum = useSpectrumPolling();
-  const measurement=useMeasurement(spectrum.measuring);
+  // Public fixed page never measures: force the tool inactive even if a stale
+  // measuring flag ever arrived.
+  const measurement=useMeasurement(IS_PUBLIC ? false : spectrum.measuring);
   const closeMeasurement=()=>{measurement.clear();spectrum.endMeasurement();};
   const detections = useDetectionsPolling();
   const intensityRef =
@@ -152,7 +155,21 @@ function App() {
 
         <ObservationInfo elevation={sunEph?.el ?? null} />
 
-        <SpectrumControls spectrum={spectrum} />
+        {IS_PUBLIC ? (
+          <section aria-label="Public live status" data-testid="public-fixed-status" data-playing="true" data-seconds={spectrum.seconds}
+            className="rounded-xl border border-emerald-800 bg-slate-900/80 p-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+              <span className="font-semibold text-emerald-300">● Live · Fixed last 5 min</span>
+              <span className="text-slate-300">Full band 15–85 MHz · Rolling latest 300 s · No pause or zoom</span>
+            </div>
+            <p className="mt-1 text-xs text-slate-400" data-testid="public-source-timestamp">
+              Source data through {spectrum.lastUpdate ?? 'waiting for data…'}
+              {spectrum.data ? ` · Showing ${new Date(spectrum.view.start*1000).toISOString().slice(11,19)} → ${new Date(spectrum.view.end*1000).toISOString().slice(11,19)} UTC` : ''}
+            </p>
+          </section>
+        ) : (
+          <SpectrumControls spectrum={spectrum} />
+        )}
 
         <section aria-label="Live spectra and solar images" className={`live-monitor-grid ${spectrum.measuring?'measure-open':''}`}>
           <section aria-label="Live Stokes I and V spectra" className="live-spectrum-stack grid min-w-0 gap-4">
@@ -165,7 +182,7 @@ function App() {
                   <span>3×10³</span><span>Log · s.f.u.</span>
                 </div>
               </div>
-              <SpectrumCanvas ref={intensityRef} data={spectrum.data} view={spectrum.view} onPause={spectrum.pause} onZoom={spectrum.zoom} measurePoints={measurement.points} onMeasurePoint={spectrum.measuring&&!spectrum.snapshotLoading?measurement.addPoint:undefined} polarization="I" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
+              <SpectrumCanvas ref={intensityRef} data={spectrum.data} view={spectrum.view} onPause={IS_PUBLIC ? ()=>{} : spectrum.pause} onZoom={IS_PUBLIC ? ()=>{} : spectrum.zoom} measurePoints={IS_PUBLIC ? [] : measurement.points} onMeasurePoint={IS_PUBLIC ? undefined : (spectrum.measuring&&!spectrum.snapshotLoading?measurement.addPoint:undefined)} interactive={!IS_PUBLIC} polarization="I" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
             </section>
             <section aria-labelledby="circular-title" className="live-spectrum-panel overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
@@ -176,12 +193,12 @@ function App() {
                   <span>+0.6</span><span>Linear · V / I</span>
                 </div>
               </div>
-              <SpectrumCanvas data={spectrum.data} view={spectrum.view} onPause={spectrum.pause} onZoom={spectrum.zoom} measurePoints={measurement.points} onMeasurePoint={spectrum.measuring&&!spectrum.snapshotLoading?measurement.addPoint:undefined} polarization="V" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
+              <SpectrumCanvas data={spectrum.data} view={spectrum.view} onPause={IS_PUBLIC ? ()=>{} : spectrum.pause} onZoom={IS_PUBLIC ? ()=>{} : spectrum.zoom} measurePoints={IS_PUBLIC ? [] : measurement.points} onMeasurePoint={IS_PUBLIC ? undefined : (spectrum.measuring&&!spectrum.snapshotLoading?measurement.addPoint:undefined)} interactive={!IS_PUBLIC} polarization="V" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
             </section>
           </section>
 
           <div className="live-image-stack">
-            <MeasurementPanel spectrum={spectrum} tool={measurement} onClose={closeMeasurement}/>
+            {!IS_PUBLIC && <MeasurementPanel spectrum={spectrum} tool={measurement} onClose={closeMeasurement}/>}
             <RadioImagesPanel />
           </div>
         </section>

@@ -1,6 +1,7 @@
 import type {useSpectrumPolling} from './useSpectrum';
 import type {useMeasurement} from './useMeasurement';
 import type {DensityModel} from './measureModel';
+import { IS_PUBLIC } from '../../lib/appMode';
 
 type Series={x:number;y:number}[];
 const utc=(t:number)=>new Date(t*1000).toISOString().slice(11,23);
@@ -33,6 +34,8 @@ function MeasurePlot({series,time,title,xlabel,ylabel,id}:{series:Series;time?:b
 
 type Props={spectrum:ReturnType<typeof useSpectrumPolling>;tool:ReturnType<typeof useMeasurement>;onClose:()=>void};
 export function MeasurementPanel({spectrum:s,tool:t,onClose}:Props) {
+ // Public fixed page has no measurement launcher/panel/picking.
+ if (IS_PUBLIC) return null;
  const button='rounded border border-slate-600 px-2 py-1 hover:bg-slate-800 disabled:opacity-40';
  const field='min-w-0 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-slate-100';
  const segments=t.result?.segments??[];

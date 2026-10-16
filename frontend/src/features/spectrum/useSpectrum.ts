@@ -2,9 +2,10 @@ import * as React from 'react';
 import { fetchSpectrumRange, fetchNativeSpectrumPage, type SpectrumCursor } from '../../api/client';
 import {loadFrozenHistory,sliceFrozen} from './measureModel';
 import { FULL_BAND, mergeRange, rangeQuery, type QueryRange, type RangeBatch, type ViewBounds } from './rangeModel';
+import { IS_PUBLIC, PUBLIC_FMAX, PUBLIC_FMIN, PUBLIC_SECONDS } from '../../lib/appMode';
 
 interface Selection extends QueryRange { fmin: number; fmax: number; reason: 'view' | 'pause' }
-const initial: Selection = {seconds:300,...FULL_BAND,reason:'view'};
+const initial: Selection = {seconds:PUBLIC_SECONDS,fmin:PUBLIC_FMIN,fmax:PUBLIC_FMAX,reason:'view'};
 
 export function useSpectrumPolling() {
   const [selection,setSelection] = React.useState<Selection>(initial);
@@ -66,6 +67,7 @@ export function useSpectrumPolling() {
   },[selection,playing,revision,measuring]);
 
   const pause = React.useCallback(()=>{
+    if (IS_PUBLIC) return;
     stopRequests();
     const current = dataRef.current;
     setPlaying(false); setRefreshing(false);
@@ -75,6 +77,7 @@ export function useSpectrumPolling() {
   React.useEffect(()=>()=>snapshotController.current?.abort(),[]);
 
   function beginMeasurement() {
+    if (IS_PUBLIC) return;
     const current=dataRef.current;if(!current||measuringRef.current)return;
     measuringRef.current=true;frozenRef.current=current;stopRequests();
     setMeasuring(true);setPlaying(false);setSnapshotLoading(true);setSnapshotError('');
@@ -86,41 +89,56 @@ export function useSpectrumPolling() {
     }).catch(error=>{if(!controller.signal.aborted){setSnapshotLoading(false);setSnapshotError(error instanceof Error?error.message:'Unable to load full frozen history');}});
   }
   function endMeasurement() {
+    if (IS_PUBLIC) return;
     snapshotController.current?.abort();measuringRef.current=false;frozenRef.current=null;
     stopRequests();setMeasuring(false);setSnapshotLoading(false);setPlaying(false);
     setSelection(s=>({...s,reason:'pause'}));
   }
 
   function preset(seconds:number) {
+    if (IS_PUBLIC) return;
     setPresetSeconds(seconds);
     stopRequests(); setRefreshing(true);
     const end = selection.end ?? dataRef.current?.display_end;
     setSelection({...FULL_BAND,seconds,...(!playing && end!==undefined?{start:end-seconds,end}:{}),reason:'view'});
   }
   function zoom(bounds:ViewBounds) {
+    if (IS_PUBLIC) return;
     stopRequests();setPlaying(false);setRefreshing(true);
     setSelection({...bounds,seconds:bounds.end-bounds.start,reason:'view'});
   }
   function play() {
+    if (IS_PUBLIC) return;
     if(measuringRef.current)return;
     stopRequests();setPlaying(true);setRefreshing(true);
     setSelection(s=>({seconds:s.seconds,fmin:s.fmin,fmax:s.fmax,reason:'view'}));
   }
   function live() {
+    if (IS_PUBLIC) return;
     if(measuringRef.current)return;
     setPresetSeconds(180);
     stopRequests();setPlaying(true);setRefreshing(true);
     setSelection({...FULL_BAND,seconds:180,reason:'view'});
   }
-  function refresh() {stopRequests();setRefreshing(true);setSelection(s=>({...s,reason:'view'}));setRevision(n=>n+1);}
+  // Manual refresh is allowed in public mode but must keep the fixed rolling
+  // 300 s full-band view: it only bumps the revision, never changes selection.
+  function refresh() {
+    if (IS_PUBLIC) {stopRequests();setRefreshing(true);setRevision(n=>n+1);return;}
+    stopRequests();setRefreshing(true);setSelection(s=>({...s,reason:'view'}));setRevision(n=>n+1);
+  }
   const end = selection.end ?? data?.display_end ?? 0;
   const view = {start:selection.start ?? end-selection.seconds,end,fmin:selection.fmin,fmax:selection.fmax};
   const lastStamp = data?.coverage_end;
-  return {data,view,playing,seconds:selection.seconds,status,refreshing,
+  // Public builds ignore any stray selection drift and always expose the
+  // fixed rolling 300 s full-band view, even if a caller passes something else.
+  const publicView = data ? {start:(data.display_end)-PUBLIC_SECONDS,end:data.display_end,fmin:FULL_BAND.fmin,fmax:FULL_BAND.fmax} : {start:view.start,end:view.end,fmin:FULL_BAND.fmin,fmax:FULL_BAND.fmax};
+  const exposedView = IS_PUBLIC ? publicView : view;
+  const exposedSeconds = IS_PUBLIC ? PUBLIC_SECONDS : selection.seconds;
+  return {data,view:exposedView,playing:IS_PUBLIC ? true : playing,seconds:exposedSeconds,status,refreshing,
     frameCount:data?.raw_rows??0, historyLoading:refreshing,
     lastUpdate:lastStamp?new Date(lastStamp*1000).toISOString().slice(11,19)+' (UTC)':null,
-    measuring,snapshotLoading,snapshotError,beginMeasurement,endMeasurement,
-    zoomOut:()=>{const half=Math.min(1800,view.end-view.start),center=(view.start+view.end)/2;
+    measuring:IS_PUBLIC ? false : measuring,snapshotLoading:IS_PUBLIC ? false : snapshotLoading,snapshotError:IS_PUBLIC ? '' : snapshotError,beginMeasurement,endMeasurement,
+    zoomOut:()=>{if(IS_PUBLIC)return;const half=Math.min(1800,view.end-view.start),center=(view.start+view.end)/2;
       const end=Math.min(center+half,dataRef.current?.coverage_end??center+half);
       const fcenter=(view.fmin+view.fmax)/2,fhalf=view.fmax-view.fmin;
       zoom({start:end-2*half,end,fmin:Math.max(15,fcenter-fhalf),fmax:Math.min(85,fcenter+fhalf)});},

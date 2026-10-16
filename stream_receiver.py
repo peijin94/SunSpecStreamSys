@@ -11,6 +11,8 @@ import os
 import sqlite3
 import uuid
 import struct
+import deployment_mode
+from deployment_mode import DEFAULT_WEB_PORT
 from spectrum_time import time_raster, source_box
 from spectrum_measure import measure_spectrum
 from spectrum_prefill import load_npz_history
@@ -83,12 +85,20 @@ class StreamReceiver:
     """
     
     def __init__(self, stream_addr='127.0.0.1', stream_port=9798, buffer_length=None, gc_interval=100,
-                 start_webshow=False, streaming_interval=0.5, verbose=False, plot_dir='./figs/', save_dir='./stream_spec_npz/', save_all_to_file=True):
+                 start_webshow=False, streaming_interval=0.5, verbose=False, plot_dir='./figs/', save_dir='./stream_spec_npz/', save_all_to_file=True,
+                 app_mode='dev', web_port=DEFAULT_WEB_PORT, no_archive=False):
         self.stream_addr = stream_addr
         self.stream_port = stream_port
         if not np.isfinite(streaming_interval) or streaming_interval <= 0:
             raise ValueError('streaming_interval must be positive and finite')
-        self.buffer_length = int(np.ceil(HISTORY_SECONDS / streaming_interval)) + 1 if buffer_length is None else buffer_length
+        self.app_mode = deployment_mode.normalize_mode(app_mode)
+        self.web_port = deployment_mode.validate_web_port(web_port)
+        self.no_archive = bool(no_archive)
+        if self.no_archive:
+            # Development service reads archive prefill but never writes the
+            # shared NPZ/full-frame archives.
+            save_all_to_file = False
+        self.buffer_length = deployment_mode.ring_capacity(streaming_interval, self.app_mode) if buffer_length is None else buffer_length
         self.archive_frames = 0  # Restored handoff frames are not newly acquired archive frames.
         self.gc_interval = gc_interval  # Garbage collection interval
         self.start_webshow = start_webshow # Flag to start web server
@@ -169,8 +179,17 @@ class StreamReceiver:
         if self.start_webshow:
             self.log.info("Web server enabled")
     
+    def get_history_seconds(self):
+        """API source-time horizon for this deployment (dev 3600, public 300)."""
+        return deployment_mode.history_seconds(getattr(self, 'app_mode', 'dev'))
+
     def restore_restart_snapshot(self):
-        """Consume an optional deployment handoff to preserve the live time window."""
+        """Consume an optional deployment handoff to preserve the live time window.
+
+        Accepts a full old raw hour and trims it safely to the chosen ring
+        capacity and source horizon, leaving archive_frames at 0. Shape,
+        finite, chronological-order, and freshness validations stay intact.
+        """
         path = os.path.join(self.plot_dir, 'restart-snapshot.npz')
         if not os.path.exists(path):
             return
@@ -178,15 +197,38 @@ class StreamReceiver:
             with np.load(path, allow_pickle=False) as saved:
                 intensity, circular, times = saved['I'], saved['V'], saved['timestamps']
                 count = len(times)
+                try:
+                    cadence = float(getattr(self, 'streaming_interval', 0.5))
+                except (TypeError, ValueError):
+                    cadence = 0.5
+                hour_frames = int(np.ceil(3600 / cadence)) + 1 if np.isfinite(cadence) and cadence > 0 else 7201
                 if (intensity.shape != (count, 768) or circular.shape != intensity.shape
-                        or count < 1 or count > self.buffer_length or not np.isfinite(times).all()
+                        or count < 1 or count > max(self.buffer_length, hour_frames, 7201)
+                        or not np.isfinite(times).all()
                         or np.any(np.diff(times) < 0) or abs(time.time() - times[-1]) > 300):
                     raise ValueError('Invalid or stale restart snapshot')
+                # Trim a full old hour to this deployment's source horizon,
+                # then to ring capacity. Public keeps raw handoff frames up to
+                # ring capacity (the 300 s cutoff applies in API getters, so
+                # slow-cadence detector history survives restarts). Restored
+                # frames never count as new archive frames.
+                if not deployment_mode.is_public(getattr(self, 'app_mode', 'dev')):
+                    horizon = self.get_history_seconds()
+                    keep = times >= float(times[-1]) - horizon - 1e-6
+                    intensity, circular, times = intensity[keep], circular[keep], times[keep]
+                if len(times) > self.buffer_length:
+                    intensity = intensity[-self.buffer_length:]
+                    circular = circular[-self.buffer_length:]
+                    times = times[-self.buffer_length:]
+                count = len(times)
+                if not count:
+                    raise ValueError('Restart snapshot outside source horizon')
                 self.ring_buffer[:count] = intensity
                 self.ring_buffer_v[:count] = circular
                 self.ring_arr_mjd[:count, 0] = times / 86400.0 + 40587.0
                 self.buffer_index = count % self.buffer_length
                 self.frames_received = count
+                self.archive_frames = 0
                 self.bootstrap_watermark_mjd = float(self.ring_arr_mjd[count-1,0])
                 self.prefill_info = {'source':'handoff','frames':count,'files':1}
             os.replace(path, os.path.join(self.plot_dir, 'restart-snapshot.used.npz'))
@@ -230,7 +272,7 @@ class StreamReceiver:
                                 snapshot=None, filename='latest_data.jpg'):
         """Render one immutable source-time snapshot in the model's orientation."""
         from skimage.transform import resize
-        metadata, intensity, _, timestamps = snapshot or self._get_spectrum_arrays()
+        metadata, intensity, _, timestamps = snapshot or self._get_spectrum_arrays(_public_cutoff=False)
         raster, _, _ = time_raster(intensity, timestamps, metadata.get('previous_timestamp'))
         data_out = resize(raster, out_size, anti_aliasing=True)
         path = os.path.join(self.plot_dir, filename)
@@ -241,7 +283,9 @@ class StreamReceiver:
     def save_latest_data_to_npz(self, norm_factor=1e4*24, save_dir='./figs/',
         filename='latest_data.npz', save_when_sun_up=True): # norm factor to convert to sfu
         """Save the latest data to a npz file"""
-
+        if getattr(self, 'no_archive', False):
+            # --no-archive reads archive prefill but never writes archives.
+            return None
 
         import check_sun_elevation
         if save_when_sun_up:
@@ -249,7 +293,7 @@ class StreamReceiver:
                 self.log.info("Sun is down, not saving data")
                 return
 
-        _, latest_data, latest_data_v, timestamps = self._get_spectrum_arrays(limit=RECENT_FRAMES)
+        _, latest_data, latest_data_v, timestamps = self._get_spectrum_arrays(limit=RECENT_FRAMES, _public_cutoff=False)
         mjd_data = (timestamps / 86400.0 + 40587.0)[:, None]
 
         # create 3-dim array with shape (*latest_data.shape, 2)
@@ -350,7 +394,7 @@ class StreamReceiver:
         current_time = time.time()
         if current_time - self.last_ai_attempt < self.ai_summary_interval:
             return
-        metadata,intensity,circular,stamps = self._get_spectrum_arrays()
+        metadata,intensity,circular,stamps = self._get_spectrum_arrays(_public_cutoff=False)
         keep=(stamps>=current_time-300)&(stamps<=current_time+1)
         intensity,circular,stamps=intensity[keep],circular[keep],stamps[keep]
         if len(stamps)<2:
@@ -396,7 +440,7 @@ class StreamReceiver:
         current_time = time.time()
         if current_time - self.last_detection_attempt < self.detection_interval:
             return
-        snapshot = self._get_spectrum_arrays()
+        snapshot = self._get_spectrum_arrays(_public_cutoff=False)
         metadata, intensity, _, timestamps = snapshot
         if len(timestamps) < 2:
             return
@@ -598,16 +642,18 @@ class StreamReceiver:
             
 
             # Archiving cadence is independent of the one-hour display ring.
-            self.archive_frames = getattr(self, 'archive_frames', 0) + 1
-            if self.save_all_to_file and self.archive_frames >= RECENT_FRAMES:
-                self.archive_frames = 0
-                
-                time_now_iso_str = Time.now().iso[:19].replace(' ', '_').replace(':', '_')
-                date_now_str = Time.now().iso[:10].replace(' ', '_').replace(':', '_')
-                dir_data = os.path.join(self.save_dir, date_now_str)
-                #mkdir
-                os.makedirs(dir_data, exist_ok=True)
-                self.save_latest_data_to_npz(save_dir=dir_data, filename=f'{time_now_iso_str}.npz')
+            # --no-archive never writes shared archives (prefill reads stay on).
+            if not getattr(self, 'no_archive', False):
+                self.archive_frames = getattr(self, 'archive_frames', 0) + 1
+                if self.save_all_to_file and self.archive_frames >= RECENT_FRAMES:
+                    self.archive_frames = 0
+
+                    time_now_iso_str = Time.now().iso[:19].replace(' ', '_').replace(':', '_')
+                    date_now_str = Time.now().iso[:10].replace(' ', '_').replace(':', '_')
+                    dir_data = os.path.join(self.save_dir, date_now_str)
+                    #mkdir
+                    os.makedirs(dir_data, exist_ok=True)
+                    self.save_latest_data_to_npz(save_dir=dir_data, filename=f'{time_now_iso_str}.npz')
             
             # Clean up temporary objects to reduce memory overhead
             del frame_data, pol_data, pol_data_reshaped, averaged_data
@@ -795,7 +841,7 @@ class StreamReceiver:
             'buffer_index': self.buffer_index,
             'buffer_shape': self.ring_buffer.shape,
             'frames_received': self.frames_received,
-            'history_seconds': HISTORY_SECONDS,
+            'history_seconds': self.get_history_seconds(),
             'prefill': getattr(self, 'prefill_info', {'source':'none','frames':0,'files':0}),
             'is_running': self.running,
             'current_delay': self.delay,
@@ -836,17 +882,46 @@ class StreamReceiver:
                 values = self.ring_buffer_v[indices].copy()
             else:
                 raise ValueError(f"Invalid polarization: {pol}")
-            return values, self.ring_arr_mjd[indices].copy()
+            stamps = self.ring_arr_mjd[indices].copy()
+        if deployment_mode.is_public(getattr(self, 'app_mode', 'dev')) and len(stamps):
+            # Legacy endpoints must not expose more than 300 source seconds.
+            times = (stamps[:, 0] - 40587.0) * 86400.0
+            finite = times[np.isfinite(times) & (times > 0)]
+            if len(finite):
+                cutoff = finite[-1] - deployment_mode.PUBLIC_SECONDS - 1e-6
+                keep = np.isfinite(times) & (times >= cutoff)
+                values, stamps = values[keep], stamps[keep]
+        return values, stamps
 
-    def _get_spectrum_arrays(self, since=None, boot_id=None, limit=None, before=None):
-        """Atomic paired samples; small recent snapshots and paged older history."""
+    def _get_spectrum_arrays(self, since=None, boot_id=None, limit=None, before=None,
+                             _public_cutoff=None):
+        """Atomic paired samples; small recent snapshots and paged older history.
+
+        Public API responses enforce the real UTC 300 s cutoff while the ring
+        keeps enough frames for archives and analysis. Internal archive and
+        analysis snapshots pass _public_cutoff=False to keep the latest 600.
+        """
         with self.buffer_lock:
             sequence = self.frames_received
             available = min(sequence, self.buffer_length)
             oldest = sequence - available + 1
+            enforce = deployment_mode.is_public(getattr(self, 'app_mode', 'dev')) if _public_cutoff is None else bool(_public_cutoff)
+            if enforce and before is not None:
+                # Public has no paged-history clients; live deltas use since.
+                raise ValueError('public snapshots do not support before pagination')
+            if enforce and available:
+                probe = (np.arange(self.buffer_index - available, self.buffer_index) % self.buffer_length)
+                probe_times = (self.ring_arr_mjd[probe, 0] - 40587.0) * 86400.0
+                finite = probe_times[np.isfinite(probe_times) & (probe_times > 0)]
+                if len(finite):
+                    horizon = int(np.count_nonzero(
+                        probe_times >= finite[-1] - deployment_mode.PUBLIC_SECONDS - 1e-6))
+                    if horizon < available:
+                        oldest = sequence - max(horizon, 1) + 1
             limit = min(self.buffer_length, RECENT_FRAMES) if limit is None else min(self.buffer_length, RECENT_FRAMES, max(1, limit))
             history = before is not None and boot_id == self.boot_id
             reset = not history and (since is None or boot_id != self.boot_id or since < 0
+                                     or since < oldest - 1
                                      or since > sequence or sequence - since > min(available, limit))
             end = min(before, sequence) if history else sequence
             count = max(0, min(limit, end - oldest + 1)) if history or reset else sequence - since
@@ -873,8 +948,12 @@ class StreamReceiver:
 
     def _get_range_arrays(self, seconds=300, start=None, end=None, max_rows=1200,
                           since=None, boot_id=None):
-        """Copy only the requested one-hour source-time window under the ingest lock."""
+        """Copy only the requested source-time window under the ingest lock."""
+        if deployment_mode.is_public(getattr(self, 'app_mode', 'dev')):
+            # Public offers only the fixed rolling 300 s window.
+            deployment_mode.validate_public_range(seconds, start, end)
         validate_range(seconds, start, end, max_rows)
+        horizon = self.get_history_seconds()
         relative = start is None
         with self.buffer_lock:
             sequence = self.frames_received
@@ -883,7 +962,7 @@ class StreamReceiver:
             all_times = (self.ring_arr_mjd[indices, 0]-40587.0)*86400.0
             valid = np.isfinite(all_times) & (all_times > 0)
             latest = float(all_times[valid][-1]) if np.any(valid) else None
-            valid &= all_times >= ((latest-HISTORY_SECONDS) if latest is not None else 0)
+            valid &= all_times >= ((latest-horizon) if latest is not None else 0)
             retained = all_times[valid]
             coverage_start = float(retained[0]) if len(retained) else None
             coverage_end = float(retained[-1]) if len(retained) else None
@@ -921,7 +1000,7 @@ class StreamReceiver:
             'coverage_start': coverage_start, 'coverage_end': coverage_end,
             'native_cadence_seconds': cadence, 'bin_seconds': bin_seconds,
             'integration_seconds': min(cadence, float(getattr(self, 'streaming_interval', .5))*1.05),
-            'raw_rows': raw_rows, 'history_seconds': HISTORY_SECONDS,
+            'raw_rows': raw_rows, 'history_seconds': horizon,
             'buffer_length': self.buffer_length, 'buffer_index': index, 'timestamp': time.time(),
         }
         return metadata, intensity, circular, times
@@ -973,14 +1052,10 @@ class StreamReceiver:
             app = FastAPI()
             app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=3)
 
-            # CORS configuration similar to previous Flask+CORS
-            app.add_middleware(
-                CORSMiddleware,
-                allow_origins=["*"],
-                allow_credentials=True,
-                allow_methods=["*"],
-                allow_headers=["*"],
-            )
+            # Dev APIs are credentialed (Apache Basic auth) and served only to
+            # the observatory origin; public read-only APIs are credentialless.
+            app.add_middleware(CORSMiddleware, **deployment_mode.cors_options(
+                getattr(self, 'app_mode', 'dev')))
 
             # Serve built frontend assets
             assets_dir = os.path.join(frontend_dist, "assets")
@@ -1013,16 +1088,26 @@ class StreamReceiver:
                              limit: int = Query(600, ge=1, le=600), before: int = Query(None, ge=0)):
                 if since is not None and before is not None:
                     raise HTTPException(status_code=400, detail='Use since or before, not both')
+                if (before is not None
+                        and deployment_mode.is_public(getattr(self, 'app_mode', 'dev'))):
+                    # Public has no paged-history clients; live deltas use since.
+                    raise HTTPException(status_code=400, detail='Public snapshots do not support before pagination')
                 headers = {'Cache-Control': 'no-store'}
-                if format == 'binary':
-                    return Response(self.get_spectrum_binary(since, boot_id, limit, before),
-                                    media_type='application/octet-stream', headers=headers)
-                if format != 'json':
-                    raise HTTPException(status_code=400, detail='Unknown spectrum format')
-                return JSONResponse(self.get_spectrum_snapshot(since, boot_id, limit, before), headers=headers)
+                try:
+                    if format == 'binary':
+                        return Response(self.get_spectrum_binary(since, boot_id, limit, before),
+                                        media_type='application/octet-stream', headers=headers)
+                    if format != 'json':
+                        raise HTTPException(status_code=400, detail='Unknown spectrum format')
+                    return JSONResponse(self.get_spectrum_snapshot(since, boot_id, limit, before), headers=headers)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc))
 
             @app.post('/spectrum-measure')
             async def spectrum_measure(request: Request):
+                if deployment_mode.is_public(getattr(self, 'app_mode', 'dev')):
+                    # The public service is not interactive.
+                    raise HTTPException(status_code=404, detail='Not found')
                 body=bytearray()
                 async for chunk in request.stream():
                     body.extend(chunk)
@@ -1180,11 +1265,22 @@ class StreamReceiver:
                         status_code=500,
                     )
 
+            @app.get('/deployment')
+            def get_deployment():
+                return JSONResponse(
+                    deployment_mode.deployment_payload(
+                        getattr(self, 'app_mode', 'dev'),
+                        getattr(self, 'web_port', DEFAULT_WEB_PORT)),
+                    headers={'Cache-Control': 'no-store'})
+
             @app.get("/debug/request")
             async def debug_request(request: Request):
                 """Debug endpoint to inspect client IP and headers."""
                 try:
-                    headers = {k: v for k, v in request.headers.items()}
+                    # Never reflect credential headers (Authorization,
+                    # Proxy-Authorization, Cookie) in JSON.
+                    headers = deployment_mode.filter_debug_headers(
+                        {k: v for k, v in request.headers.items()})
                     client_host = request.client.host if request.client else None
                     info = {
                         "client_host": client_host,
@@ -1197,7 +1293,7 @@ class StreamReceiver:
                     return JSONResponse({"error": "debug failed"}, status_code=500)
 
             self.app = app
-            web_port = 9527
+            web_port = int(getattr(self, 'web_port', DEFAULT_WEB_PORT))
             self.log.info(f"Web server starting on http://localhost:{web_port} (FastAPI + Uvicorn)")
 
             def run_server():
@@ -1235,10 +1331,11 @@ class StreamReceiver:
         """Check if the web server is running and accessible"""
         if not self.start_webshow or not hasattr(self, 'webserver_thread'):
             return False
-        
+
         try:
             import requests
-            response = requests.get("http://localhost:9527/", timeout=2)
+            web_port = int(getattr(self, 'web_port', DEFAULT_WEB_PORT))
+            response = requests.get(f"http://localhost:{web_port}/", timeout=2)
             return response.status_code == 200
         except:
             return False
@@ -1254,23 +1351,32 @@ class StreamReceiver:
             }
         
         running = self.is_webserver_running()
+        web_port = int(getattr(self, 'web_port', DEFAULT_WEB_PORT))
         return {
             'enabled': True,
             'running': running,
-            'url': 'http://localhost:9527' if running else None,
+            'url': f'http://localhost:{web_port}' if running else None,
             'status': 'running' if running else 'failed'
         }
 
 
-def main():
-    """Main function for standalone testing"""
+def build_parser():
+    """Command-line flags for the receiver (ZMQ --port stays the source)."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Stream Receiver for AvgStreamingOp")
     parser.add_argument('--addr', type=str, default='127.0.0.1',
                        help='Stream address (default: 127.0.0.1)')
     parser.add_argument('--port', type=int, default=30002,
-                       help='Stream port (default: 30002)')
+                       help='ZMQ stream source port (default: 30002)')
+    parser.add_argument('--app-mode', type=str, default='dev', choices=['dev', 'public'],
+                       help='Deployment variant: dev keeps the full hour and '
+                            'interactive measurement; public serves only the fixed '
+                            'rolling 300 s window (default: dev)')
+    parser.add_argument('--web-port', type=int, default=DEFAULT_WEB_PORT,
+                       help=f'Loopback web/API port for Uvicorn (default: {DEFAULT_WEB_PORT})')
+    parser.add_argument('--no-archive', action='store_true',
+                       help='Read archive prefill but never write shared NPZ/full-frame archives')
     parser.add_argument('--buffer-length', type=int, default=None,
                        help='Ring capacity override (default: one hour at streaming-interval cadence)')
     parser.add_argument('--gc-interval', type=int, default=100,
@@ -1279,7 +1385,7 @@ def main():
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                        help='Log level (default: INFO)')
     parser.add_argument('--start-webshow', action='store_true',
-                       help='Start a web server on localhost:9898 to display live spectrum data')
+                       help='Start a web server on localhost:<web-port> to display live spectrum data')
     parser.add_argument('--streaming-interval', type=float, default=0.5,
                        help='Streaming interval in seconds per frame (default: 0.5)')
     parser.add_argument('--save-all-to-file', action=argparse.BooleanOptionalAction,
@@ -1289,6 +1395,14 @@ def main():
                        help='Directory to save data files (default: stream_spec_npz/)')
     parser.add_argument('--verbose', action='store_true',
                        help='Verbose output')
+    return parser
+
+
+def main():
+    """Main function for standalone testing"""
+    import argparse
+
+    parser = build_parser()
     
     args = parser.parse_args()
     
@@ -1309,7 +1423,10 @@ def main():
         streaming_interval=args.streaming_interval,
         verbose=args.verbose,
         save_dir=args.save_dir,
-        save_all_to_file=args.save_all_to_file
+        save_all_to_file=args.save_all_to_file,
+        app_mode=args.app_mode,
+        web_port=args.web_port,
+        no_archive=args.no_archive,
     )
     
     try:

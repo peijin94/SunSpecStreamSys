@@ -2,13 +2,55 @@
 
 This document describes the streaming system that consists of an `AvgStreamingOp` in the OVRO data recorder and a `StreamReceiver` in the SunSpecStreamSys repository.
 
-## Current `/live/` application
+## Public and development live applications
 
-On `ovsa`, `/live/` runs from `/home/peijin/SunSpecStreamSys` on branch
-`production/ovsa`, using the `lwa-stream-receiver` user unit. The FastAPI/Uvicorn
-backend listens on loopback port 9527; Apache publishes it at
-`https://ovsa.njit.edu/live/`. The companion tunnel forwards `calim3:30005` to
-loopback port 30005. The frontend uses React, TypeScript, Vite, and Tailwind.
+Two branches, checkouts, user services and separately built frontends run on `ovsa`:
+
+| Branch | URL | HTTP listener | Checkout | User service |
+|---|---|---|---|---|
+| `live-public` | `https://ovsa.njit.edu/live/` | `127.0.0.1:9527` (unchanged) | `/home/peijin/SunSpecStreamSys` | `lwa-stream-receiver` |
+| `live-dev` | `https://ovsa.njit.edu/live-dev/` | `127.0.0.1:9529` | `/home/peijin/SunSpecStreamSys-live-dev` | `lwa-stream-receiver-dev` |
+
+**Public** is a continuously rolling, fixed five-minute/full-band display: no time
+presets, UTC/frequency selection, drag zoom, pause/play or interactive measurement.
+The backend also restricts its APIs to the latest 300 source seconds and rejects
+measurement requests; this is not merely a hidden UI. Images, status, flagging and
+AI cards remain available. **Development** retains the latest complete one-hour
+interactive viewer and spectrum measurement tools described below.
+
+The companion tunnel forwards `calim3:30005` to loopback port 30005. Both independent
+receivers subscribe to that stream, but **only public writes the shared NPZ archive**.
+The dev unit sets `--no-archive --no-save-all-to-file` and mounts that archive path
+read-only; it may still read recent files for cold-start history. Each checkout has
+its own `figs/`, visitors database, caches, AI/detection state and frontend `dist/`.
+The frontend uses React, TypeScript, Vite, and Tailwind.
+
+Each branch tracks a nonsecret `frontend/.env.production`: `VITE_APP_MODE=public`
+and `VITE_BASE_PATH=/live/`, or `VITE_APP_MODE=dev` and
+`VITE_BASE_PATH=/live-dev/`. Build separately with `npm ci && npm run build`;
+never copy a bundle between the two base paths. Runtime mode/HTTP port are explicit
+`--app-mode public|dev --web-port 9527|9529`; `--port 30005` remains the ZMQ source.
+`GET /deployment` exposes nonsecret capability metadata for verification.
+
+### Private development access
+
+Apache challenges **HTTP Basic authentication** for the complete `/live-dev`
+subtree, including assets, images, APIs and docs. Username is `dev`; the password
+is provisioned privately, never stored in Git, a frontend bundle, query string or
+service unit. Standard browser password managers can remember this login. A
+cost-12 bcrypt verifier is installed as root-owned
+`/etc/apache2/lwa-live-dev.htpasswd` (group `www-data`, mode 0640). Authorization
+headers are removed **after authentication and before proxying**; dev responses
+are `private, no-store`. The backend also redacts credential/cookie headers from
+its diagnostic response. Port 9529 binds only to loopback, not the public interface.
+
+The user explicitly runs the reviewed `deploy/install_live_dev_apache.py` with sudo,
+a private owner-only bcrypt verifier file and the prepared vhost SHA-256. It checks
+loaded modules without changing them, preserves unrelated rules, fingerprints and
+backs up the existing TLS vhost, runs `apache2ctl configtest`, then gracefully
+reloads Apache. It restores prior routing/auth files if installation fails. Do not
+paste plaintext credentials into shell arguments or commit the verifier. The
+existing `/live/` proxy and its port remain unchanged.
 
 The page uses the available screen width. At widths of 1024 pixels and above,
 the aligned I/V spectra occupy the left column and the four solar images form
@@ -22,10 +64,11 @@ The ZeroMQ payload has shape `(1, 3072, 4)`, ordered as XX, YY, Re(XY), Im(XY).
 The receiver preserves its existing convention, `I = (XX + YY) / 2` and
 `V = Im(XY)`, then averages each group of four frequency channels into 768 bins.
 Both polarizations and the source UTC timestamp are published under one lock.
-Spectra use a one-hour memory ring (7201 paired frames at the configured 0.5 s
-cadence, with a 3600-second source-time cutoff). SQLite `visitors.db` stores
-visitor counts. The browser initially shows five minutes; **Live** resets to
-three minutes and the full frequency band. NPZ archiving remains one chunk per
+Development spectra use a one-hour memory ring (7201 paired frames at the configured
+0.5 s cadence, with a 3600-second source-time cutoff); public exposes only 300 s.
+SQLite `visitors.db` stores separate visitor counts in each checkout. Development
+initially shows five minutes; **Live** resets to three minutes and the full band.
+Public remains fixed at five minutes. Public NPZ archiving remains one chunk per
 600 **newly acquired** frames (~5 minutes), independently of ring wrap. Paired
 I/V and chronological MJD timestamps are copied atomically for each archive;
 restored deployment-handoff frames do not count as new archive frames.
@@ -51,7 +94,9 @@ current receiver sequence and their own `first_sequence`; they must not advance
 the browser's live cursor. `previous_timestamp` preserves integration coverage
 at page boundaries. The default limit remains 600 for existing clients.
 `/data` and `/refresh` retain their existing I-only schemas.
-Under Apache these endpoints are prefixed with `/live/`.
+Under Apache these endpoints are prefixed with `/live/` or `/live-dev/`. Older
+`before` pagination is development-only; public rejects historical paging and
+clips the native/legacy responses to the latest 300 source seconds.
 
 The browser uses `/spectrum?format=binary`. The `lwa-spectrum-iv-v1` format is
 a little-endian uint32 header length, space-padded UTF-8 JSON metadata aligned
@@ -59,7 +104,7 @@ to eight bytes, float64 Unix timestamps, float32 I rows, then float32 V rows.
 Header fields include `rows`, `bins`, `dtype`, `byteorder`, and `order`.
 Responses support gzip and use `Cache-Control: no-store`.
 
-The interactive browser uses `GET /spectrum-range?seconds=300&max_rows=1200`.
+The development interactive browser uses `GET /spectrum-range?seconds=300&max_rows=1200`.
 It requests only the selected range, not all retained history. The 3/5-minute
 views retain native integrations and then fetch cursor deltas at ~0.5 s cadence.
 10-minute/30-minute/1-hour presets request at most 600 UTC-aligned time bins (~1/3/6 s),
@@ -70,6 +115,8 @@ Unix `start`/`end` parameters, with a maximum duration of 3600 s. `format=binary
 Range metadata includes `display_start/end`, `coverage_start/end`, `bin_seconds`,
 `native_cadence_seconds`, `integration_seconds`, `raw_rows`, `range: true`, and `history_seconds: 3600`.
 The API validates finite/increasing bounds and limits responses to 1200 rows.
+Public accepts only `seconds=300` without explicit UTC bounds and reports
+`history_seconds: 300`; development retains `history_seconds: 3600`.
 
 Drag a time-frequency rectangle on either spectrum to pause immediately and
 zoom both panels. The selected range is fetched again at its finer resolution.
@@ -88,7 +135,7 @@ wall-clock arrival time. A deployment can hand off raw I/V and Unix timestamps i
 `<plot_dir>/restart-snapshot.npz`; the receiver validates freshness and consumes
 it once. The detector/AI still receive only the recent 600-frame analysis window.
 
-### Interactive spectrum measure
+### Interactive spectrum measure (development only)
 
 The compact **Interactive spectrum measure** button is above the live solar images.
 Opening it pauses both spectra immediately, aborts live requests, and captures up to
@@ -107,7 +154,7 @@ rendered frequency crop and sample validation use the actual four-channel-averag
 correlator grid: raw channels `[600, 3672)` at `196/8192` MHz/channel. The 15–85 MHz
 viewport crops those data rather than stretching the entire 768-bin array into it.
 
-`POST /live/spectrum-measure` (or `/spectrum-measure` directly on the receiver):
+`POST /live-dev/spectrum-measure` (or `/spectrum-measure` on the dev receiver):
 
 ```json
 {"points": [[1792160000, 60], [1792160010, 50], [1792160020, 40]], "model": "saito77", "harmonic": 1, "density_scale": 1}

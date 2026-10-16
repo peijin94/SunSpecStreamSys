@@ -1,5 +1,5 @@
 [Unit]
-Description=OVRO-LWA SunSpecStream receiver (live spectrum stream -> 127.0.0.1:9527)
+Description=OVRO-LWA public fixed-five-minute spectrum (127.0.0.1:9527)
 Wants=network-online.target
 After=network-online.target
 
@@ -15,9 +15,9 @@ Environment=LD_LIBRARY_PATH=/usr/local/cuda/lib64
 # Use the current native user CLI; the system Node/Codex installation is obsolete.
 Environment=LWA_AI_MODEL=gpt-6-luna
 Environment=LWA_CODEX_EXECUTABLE=%h/.nvm/versions/node/v20.20.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
-# --port is the *incoming* stream source port (on ovsa: an ssh tunnel from the
-# correlator node); the web interface/API port is fixed at 9527 inside stream_receiver.py.
-ExecStart=%h/miniconda3/envs/solarml/bin/python %h/SunSpecStreamSys/stream_receiver.py --start-webshow --addr 127.0.0.1 --port 30005
+# --port is the incoming ZMQ tunnel; --web-port is the HTTP listener.
+# This public service is the only writer to the shared NPZ archive.
+ExecStart=%h/miniconda3/envs/solarml/bin/python %h/SunSpecStreamSys/stream_receiver.py --start-webshow --addr 127.0.0.1 --port 30005 --app-mode public --web-port 9527
 # Restart=always: the script reports data problems by logging and continuing, and
 # exits cleanly on Ctrl-C, so on-failure would leave it down after a clean exit.
 Restart=always
