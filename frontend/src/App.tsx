@@ -159,8 +159,7 @@ function App() {
           <section aria-label="Public live status" data-testid="public-fixed-status" data-playing="true" data-seconds={spectrum.seconds}
             className="rounded-xl border border-emerald-800 bg-slate-900/80 p-3">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-              <span className="font-semibold text-emerald-300">● Live · Fixed last 5 min</span>
-              <span className="text-slate-300">Full band 15–85 MHz · Rolling latest 300 s · No pause or zoom</span>
+              <span className="font-semibold text-emerald-300">● Live</span>
             </div>
             <p className="mt-1 text-xs text-slate-400" data-testid="public-source-timestamp">
               Source data through {spectrum.lastUpdate ?? 'waiting for data…'}

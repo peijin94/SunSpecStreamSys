@@ -24,8 +24,8 @@ let browser;
  // Public fixed status is rendered immediately, even before first spectra arrive.
  const status=page.getByTestId('public-fixed-status');
  await status.waitFor({timeout:15000});
- assert.match(await status.innerText(),/Fixed last 5 min/);
- assert.match(await status.innerText(),/Full band 15[–-]85 MHz/);
+ assert.match(await status.innerText(),/^● Live(?:\n|$)/);
+ assert.doesNotMatch(await status.innerText(),/Fixed last 5 min|Full band 15[–-]85 MHz|Rolling latest 300 s|No pause or zoom/);
  assert.equal(await status.getAttribute('data-seconds'),'300');
  assert.match(await page.getByTestId('public-source-timestamp').innerText(),/Source data through/);
  check('public-fixed-status-visible',{seconds:await status.getAttribute('data-seconds')});
