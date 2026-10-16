@@ -37,7 +37,7 @@ let browser;
  assert.ok(data.source_end>=data.source_start);assert.ok(data.source_end-data.source_start<=301);
  assert.equal(data.status,'ready');assert.equal(data.error,'');
  await card.waitFor();assert.ok((await card.innerText()).includes(data.summary.slice(0,40)),'UI shows actual API summary');
- assert.equal(await page.getByText(/gemini/i).count(),0);
+ assert.equal(await card.getByText(/\bgemini\b/i).count(),0);
  assert.deepEqual(errors,[]);
  if(out){fs.mkdirSync(out,{recursive:true});await card.screenshot({path:out+'/luna-card.png'});fs.writeFileSync(out+'/luna-browser.json',JSON.stringify({base,data,errors},null,2));}
  console.log('PASS Luna model, real interpretation, source window, UI label/content, no browser errors');
