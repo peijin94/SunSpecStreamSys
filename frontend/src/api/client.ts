@@ -57,6 +57,33 @@ export async function fetchSpectrumHistory(bootId: string, before: number, signa
   return decodeSpectrum(await res.arrayBuffer());
 }
 
+export async function fetchNativeSpectrumPage(before:number,bootId:string,signal?:AbortSignal):Promise<SpectrumBatch> {
+  const response=await fetch(buildUrl(`/spectrum?format=binary&limit=600&before=${before}&boot_id=${encodeURIComponent(bootId)}`),{signal});
+  if(!response.ok)throw new Error(`Frozen history request failed: ${response.status}`);
+  return decodeSpectrum(await response.arrayBuffer());
+}
+
+export async function fetchSpectrumRange(query: string, signal?: AbortSignal) {
+  const res = await fetch(buildUrl(`/spectrum-range?${query}`), { signal });
+  if (!res.ok) throw new Error(`Spectrum range failed: ${res.status}`);
+  const data = decodeSpectrum(await res.arrayBuffer());
+  const range = data as import('../features/spectrum/rangeModel').RangeBatch;
+  if (range.range !== true || !Number.isFinite(range.display_start) ||
+      !Number.isFinite(range.display_end) || range.display_end <= range.display_start ||
+      range.display_end-range.display_start > 3600.001) throw new Error('Invalid selected spectrum range');
+  return range;
+}
+
+export async function fetchSpectrumMeasurement(points:import('../features/spectrum/measureModel').MeasurePoint[],options:import('../features/spectrum/measureModel').MeasureOptions,signal?:AbortSignal):Promise<import('../features/spectrum/measureModel').MeasureResult> {
+  const response=await fetch(buildUrl('/spectrum-measure'),{method:'POST',signal,headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({...options,points:points.map(p=>[p.time,p.frequency_mhz])})});
+  if(!response.ok){
+    const error=await response.json().catch(()=>null);
+    throw new Error(typeof error?.detail==='string'?error.detail:`Measurement request failed: ${response.status}`);
+  }
+  return await response.json();
+}
+
 export interface RefreshResponse {
   data: SpectrumFrame[];
   buffer_length: number;
@@ -75,6 +102,16 @@ export interface DetectionResponse {
 export interface AiSummaryResponse {
   summary: string;
   timestamp: number;
+  model: string;
+  provider: string;
+  status: 'waiting' | 'ready' | 'stale' | 'error';
+  error?: string;
+  source_start?: number;
+  source_end?: number;
+  sun_up?: boolean;
+  observation_time_utc?: string;
+  sun_elevation_deg?: number;
+  sun_azimuth_deg?: number;
 }
 
 export interface VisitorCountResponse {

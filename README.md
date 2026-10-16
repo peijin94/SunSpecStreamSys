@@ -22,8 +22,13 @@ The ZeroMQ payload has shape `(1, 3072, 4)`, ordered as XX, YY, Re(XY), Im(XY).
 The receiver preserves its existing convention, `I = (XX + YY) / 2` and
 `V = Im(XY)`, then averages each group of four frequency channels into 768 bins.
 Both polarizations and the source UTC timestamp are published under one lock.
-Spectra use a 600-frame memory ring and NPZ archives; SQLite `visitors.db` stores
-visitor counts. Spectrum history in the browser is a five-minute window.
+Spectra use a one-hour memory ring (7201 paired frames at the configured 0.5 s
+cadence, with a 3600-second source-time cutoff). SQLite `visitors.db` stores
+visitor counts. The browser initially shows five minutes; **Live** resets to
+three minutes and the full frequency band. NPZ archiving remains one chunk per
+600 **newly acquired** frames (~5 minutes), independently of ring wrap. Paired
+I/V and chronological MJD timestamps are copied atomically for each archive;
+restored deployment-handoff frames do not count as new archive frames.
 
 The frontend displays aligned Stokes I and V/I panels. I is converted from Jy
 to s.f.u. as `I / 1e4` and uses the exact 256-entry Viridis color map with a
@@ -54,18 +59,132 @@ to eight bytes, float64 Unix timestamps, float32 I rows, then float32 V rows.
 Header fields include `rows`, `bins`, `dtype`, `byteorder`, and `order`.
 Responses support gzip and use `Cache-Control: no-store`.
 
-Rendering uses one shared Web Worker for both panel rasters, color lookup tables,
-and transfers only changed pixel spans to reusable Canvas textures. The first
-request contains 64 recent frames; older history loads in small pages while
-incremental live requests continue. One animation callback paints both panels when
-data or size changes; idle spectra do not redraw. Polls never overlap, pause
-for hidden tabs, and catch up when the tab becomes visible. Half-second raster
-columns cover normal approximately 0.514-second integrations; longer gaps
-remain black. Refresh retains the displayed history and existing cursor, and
-fetches only new frames. The time axis shows source UTC rather than wall-clock
-arrival time. A deployment can hand off raw I/V and Unix timestamps in
+The interactive browser uses `GET /spectrum-range?seconds=300&max_rows=1200`.
+It requests only the selected range, not all retained history. The 3/5-minute
+views retain native integrations and then fetch cursor deltas at ~0.5 s cadence.
+10-minute/30-minute/1-hour presets request at most 600 UTC-aligned time bins (~1/3/6 s),
+refreshed every 5 s. I and V are averaged separately before computing V/I;
+empty bins and real recording gaps stay black. A frozen selection uses explicit
+Unix `start`/`end` parameters, with a maximum duration of 3600 s. `format=binary`
+(default) uses the same aligned paired protocol; `format=json` is also supported.
+Range metadata includes `display_start/end`, `coverage_start/end`, `bin_seconds`,
+`native_cadence_seconds`, `integration_seconds`, `raw_rows`, `range: true`, and `history_seconds: 3600`.
+The API validates finite/increasing bounds and limits responses to 1200 rows.
+
+Drag a time-frequency rectangle on either spectrum to pause immediately and
+zoom both panels. The selected range is fetched again at its finer resolution.
+Pause aborts in-flight spectrum requests and prevents late responses from moving
+the frozen axes. Play resumes a rolling view of the selected width; Live resets
+to three minutes and full band. Reset zoom restores the last chosen preset.
+A keyboard-accessible UTC From/To form selects an exact interval, including
+across midnight. The UI reports available coverage and a warming buffer; history
+is not invented for times before startup or during stream gaps.
+
+Each panel uses a Web Worker for bounded source-time raster/color rendering and
+an event-driven reusable Canvas texture; a synchronous fallback works without
+Worker support. Polls never overlap and stop for hidden tabs. Paused selections
+do not refresh on visibility changes. The time axis uses source UTC rather than
+wall-clock arrival time. A deployment can hand off raw I/V and Unix timestamps in
 `<plot_dir>/restart-snapshot.npz`; the receiver validates freshness and consumes
-it once, preserving the live window across the restart.
+it once. The detector/AI still receive only the recent 600-frame analysis window.
+
+### Interactive spectrum measure
+
+The compact **Interactive spectrum measure** button is above the live solar images.
+Opening it pauses both spectra immediately, aborts live requests, and captures up to
+one hour of native paired I/V integrations pinned to the displayed receiver boot
+and sequence. The private browser snapshot is immutable: zoom, Zoom out, presets,
+UTC bounds and explicit frequency limits operate on that snapshot, without reading
+new live samples. Play and Live are locked until the panel closes; closing leaves
+the display paused until the user explicitly resumes it. Stream ingestion and
+other browsers continue normally. A failed history capture is reported rather than
+silently substituting newer data.
+
+Click either spectrum to mark a feature (2–128 points); drag still selects a zoom
+rectangle. Markers are shared across I and V/I, with a UTC/MHz/radius point table,
+Undo, individual removal and Clear. Blank integrations cannot be picked. Both the
+rendered frequency crop and sample validation use the actual four-channel-averaged
+correlator grid: raw channels `[600, 3672)` at `196/8192` MHz/channel. The 15–85 MHz
+viewport crops those data rather than stretching the entire 768-bin array into it.
+
+`POST /live/spectrum-measure` (or `/spectrum-measure` directly on the receiver):
+
+```json
+{"points": [[1792160000, 60], [1792160010, 50], [1792160020, 40]], "model": "saito77", "harmonic": 1, "density_scale": 1}
+```
+
+Times are Unix UTC seconds; frequencies are MHz. `model` also accepts `leblanc98`
+and `newkirk`; `harmonic` is 1 (fundamental) or 2; the density multiplier spans
+0.01–100. The stateless, CPU-only calculation sorts points by time and returns:
+
+- `points`: time, `frequency_mhz`, inferred heliocentric `r_sun`;
+- `segments`: midpoint `time`, `duration_s`, mean frequency/radius,
+  signed `drift_mhz_s`, signed `radial_velocity_km_s`, and nonnegative `speed_km_s`;
+- selected model options, `solar_radius_km`, `method`, `reference_commit`,
+  `assumptions`, and `warnings`.
+
+The panel plots **df/dt (MHz/s) versus UTC time**, and **source speed (km/s) versus
+heliocentric radius (R☉)**. Each estimate is an adjacent-point secant, not a fitted
+or smoothed derivative: `df/dt = Δf/Δt`, `v_radial = 696000 × Δr/Δt`.
+The density/frequency relations follow PhySynthTrainer commit
+`6e20e0c6636557ef8032d4d9a03287273ea886d8`, with `f = h × 8.93e-3 √(k n_e)` MHz.
+The monotonic inversion is bounded to 1–100 R☉. These are **model-dependent radial
+estimates**, without projection, propagation or light-travel-time corrections;
+R☉ is distance from the centre, not height above the photosphere. Superluminal
+inferences are flagged, not silently clipped.
+
+Requests are limited to 32 KiB and 128 points; malformed inputs, duplicate or
+sub-microsecond times and model-out-of-domain frequencies return 400, oversized
+bodies return 413. Responses use `Cache-Control: no-store`. Measurement requests
+never mutate the receiver, archives, other clients or AI interpretation.
+
+### Cold-start history from NPZ
+
+If no valid deployment handoff populated the buffer, startup reads the configured
+archive directory (`/common/lwa/stream_spec_npz/` in production). It scans only
+relevant UTC day directories and at most 32 recent chunks, retaining source
+samples within the last real UTC hour, deduplicated and in chronological order.
+Old night-time archives are **not** relabelled as current data. Missing periods
+remain blank until new integrations arrive.
+
+The loader reverses the existing `1e4 * 24` archive normalization into raw Jy,
+validates the 768-channel frequency grid and paired I/V shape, skips corrupt files,
+and honors explicit normalization metadata in new archives. Legacy unversioned
+files can contain chronological power planes but cyclic physical-ring MJD arrays;
+only that time array is rotated back into chronological order, in memory. Originals
+are never modified. New files carry `archive_version=2` and `normalization_factor`.
+Prefill does not count toward the 600 **new** integrations needed for the next
+archive, and queued live samples already covered by the bootstrap tail are ignored.
+`get_buffer_status()` includes `prefill` counters and source for diagnostics.
+
+### AI interpretation: GPT-6 Luna
+
+The cached AI card uses `gpt-6-luna` through the host's existing **Codex CLI device
+login**, not Gemini or an API key. Every 60 seconds an independent worker sends a
+labelled image of the latest five-minute paired Stokes I / V/I spectrum, with true
+UTC spacing, missing-data masks, frequency direction, units, and Sun-up/night-time
+context. The prompt includes the latest integration's **UT/UTC timestamp** and
+OVRO-LWA solar **elevation and azimuth** at that same source time, calculated with
+the existing Astropy/OVRO location. Elevation is geometric degrees above the
+horizon; azimuth is degrees clockwise from true north (north=0, east=90).
+This is the **latest live** analysis, not a paused browser's historical selection.
+Only fresh valid samples are analyzed.
+
+The CLI runs an ephemeral, read-only job with shell/browser/plugin/agent tools and
+host skill discovery disabled, a filtered environment (no unrelated API keys),
+structured JSON output, and a 45-second timeout that kills its own process group.
+Failures cannot block acquisition; they retain the preceding successful Luna
+interpretation and mark it stale. `/ai-summary` retains `summary`/`timestamp` and
+adds `model`, `provider`, `status`, `error`, source UTC bounds, Sun-up context,
+`observation_time_utc`, `sun_elevation_deg`, and `sun_azimuth_deg`. The frontend
+uses the OpenAI logo and labels the model and stale results explicitly. Account
+availability and usage limits still apply; there is no silent Gemini fallback.
+
+Use a current CLI (the ovsa integration was exercised with 0.163.0). Set
+`LWA_CODEX_EXECUTABLE` to its executable/native binary and `LWA_AI_MODEL` to the
+model identifier (default `gpt-6-luna`). The deployed unit names the current native
+user-installed CLI explicitly: the system Node/Codex installation is older and
+cannot run the new integration. No credential file needs to be copied or inspected.
 
 Type III detection uses a cached YOLO model with confidence threshold 0.55
 (previously 0.60), retaining IoU 0.60 and a five-second inference interval.
@@ -81,12 +200,19 @@ source UTC, so inference or download delays do not shift them.
 Validate changes with the receiver's Python environment and Node 20:
 
 ```bash
-python -m unittest discover -s tests -p test_polarization_api.py -v
+python -m unittest discover -s tests -v
 cd frontend
 npm test
 npm run build
 npm run lint
 ```
+
+Browser acceptance scripts are `frontend/tests/live-browser.cjs` and
+`frontend/tests/paused-range-race.cjs`. They exercise the public page read-only,
+including desktop/mobile, Worker fallback, and a deliberately delayed-request
+race. Set `LWA_TEST_URL` for staging, `PLAYWRIGHT_MODULE` to an installed
+`playwright-core` module path, `BROWSER_EXECUTABLE` to Chrome/Chromium if needed,
+and `LWA_TEST_OUTPUT` to a temporary screenshot/report directory.
 
 The older examples below describe historical plotting options; use the current
 receiver's `--help` for supported command-line flags.
@@ -408,9 +534,10 @@ The `[address]` should be `127.0.0.1` if this is on local machine (calim02).
 #### As a systemd service (deployed on `ovsa`)
 
 `deploy/lwa-stream-receiver.service` runs the receiver as a systemd **user**
-service: it keeps the checkout as the working directory, reads `GEMINI_API_KEY`
-from `~/.config/lwa-stream-receiver.env` (mode 0600 — without that file the
-receiver still runs, only the live AI summary is skipped), and restarts on exit.
+service: it keeps the checkout as the working directory, uses the configured
+native Codex CLI and existing device login for Luna interpretation, and restarts
+on exit. It no longer loads the old Gemini environment file; that private file is
+left untouched. Adjust `LWA_CODEX_EXECUTABLE` in the unit if the CLI moves.
 
 ```bash
 install -m 0644 deploy/lwa-stream-receiver.service ~/.config/systemd/user/
@@ -456,7 +583,7 @@ systemctl --user enable --now lwa-stream-tunnel
 
 - `--addr`: Stream address (default: 127.0.0.1)
 - `--port`: Stream port (default: 9798)
-- `--buffer-length`: Ring buffer length (default: 1200)
+- `--buffer-length`: Ring capacity (default: one hour at the source cadence, 7201 at 0.5 s)
 - `--gc-interval`: Garbage collection interval in frames (default: 100)
 - `--plot-interval`: Plotting interval in seconds (0 = disable plotting, default: 10)
 - `--plot-dir`: Directory to save plots (default: /fast/peijinz/streaming/figs/)

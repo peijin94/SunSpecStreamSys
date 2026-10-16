@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "tsc --outDir .test-build --target ES2020 --module ES2020 --strict --skipLibCheck --lib ES2020,DOM src/api/spectrumProtocol.ts src/api/antennaProtocol.ts src/api/imagingProtocol.ts src/features/spectrum/spectrumRendering.ts src/features/spectrum/spectrumRaster.ts src/features/spectrum/detectionGeometry.ts && node --test tests/spectrum.mjs tests/antennas.mjs tests/imaging.mjs"
+    "test": "tsc --outDir .test-build --target ES2020 --module ES2020 --strict --skipLibCheck --lib ES2020,DOM src/api/spectrumProtocol.ts src/api/antennaProtocol.ts src/api/imagingProtocol.ts src/features/spectrum/spectrumRendering.ts src/features/spectrum/spectrumRaster.ts src/features/spectrum/detectionGeometry.ts src/features/spectrum/rangeModel.ts src/features/spectrum/rangePixels.ts src/features/spectrum/measureModel.ts && node --test tests/spectrum.mjs tests/antennas.mjs tests/imaging.mjs tests/range.mjs tests/measure.mjs"
   },
   "dependencies": {
     "@lobehub/icons": "^5.0.1",

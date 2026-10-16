@@ -1,7 +1,9 @@
 import './App.css';
 import { SpectrumCanvas } from './features/spectrum/SpectrumCanvas';
 import { useSpectrumPolling } from './features/spectrum/useSpectrum';
-import { submitSpectrumBatch } from './features/spectrum/spectrumRenderer';
+import { SpectrumControls } from './features/spectrum/SpectrumControls';
+import {MeasurementPanel} from './features/spectrum/MeasurementPanel';
+import {useMeasurement} from './features/spectrum/useMeasurement';
 import { useDetectionsPolling } from './features/detections/useDetections';
 import { RadioImagesPanel } from './features/images/RadioImagesPanel';
 import { ObservationInfo } from './components/ObservationInfo';
@@ -15,23 +17,26 @@ import {
   CardTitle,
 } from './components/ui/card';
 import * as React from 'react';
+import OpenAI from '@lobehub/icons/es/OpenAI/components/Mono';
 import type { SpectrumCanvasHandle } from './features/spectrum/SpectrumCanvas';
 import {
   fetchAiSummary,
   fetchVisitorCount,
   fetchSunEphemeris,
   type SunEphemeris,
+  type AiSummaryResponse,
 } from './api/client';
-import { Gemini } from '@lobehub/icons';
 
 function App() {
-  const spectrum = useSpectrumPolling(submitSpectrumBatch);
+  const spectrum = useSpectrumPolling();
+  const measurement=useMeasurement(spectrum.measuring);
+  const closeMeasurement=()=>{measurement.clear();spectrum.endMeasurement();};
   const detections = useDetectionsPolling();
   const intensityRef =
     React.useRef<SpectrumCanvasHandle | null>(null);
-  const [aiSummary, setAiSummary] = React.useState('');
-  const [aiSummaryTime, setAiSummaryTime] =
-    React.useState<number | null>(null);
+  const [aiResult, setAiResult] = React.useState<AiSummaryResponse | null>(null);
+  const aiSummary = aiResult?.summary ?? '';
+  const aiSummaryTime = aiResult?.timestamp ?? null;
   const [eventsMode, setEventsMode] =
     React.useState<'count' | 'list'>('count');
   const [visitorCount, setVisitorCount] =
@@ -40,10 +45,8 @@ function App() {
     React.useState<SunEphemeris | null>(null);
 
   React.useEffect(() => {
-    intensityRef.current?.setDetections(
-      detections.detections,
-    );
-  }, [detections.detections]);
+    if(!spectrum.measuring)intensityRef.current?.setDetections(detections.detections);
+  }, [detections.detections,spectrum.measuring]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -52,14 +55,13 @@ function App() {
       try {
         const data = await fetchAiSummary();
         if (cancelled) return;
-        if (data.summary) {
-          setAiSummary(data.summary);
-          setAiSummaryTime(
-            data.timestamp || null,
-          );
-        }
+        setAiResult(data);
       } catch {
-        // ignore errors for now
+        if (cancelled) return;
+        setAiResult(previous => ({
+          ...(previous ?? { summary: '', timestamp: 0, model: 'gpt-6-luna', provider: 'openai-codex' }),
+          status: previous?.summary ? 'stale' : 'error', error: 'AI summary temporarily unavailable',
+        }));
       }
     }
 
@@ -150,7 +152,9 @@ function App() {
 
         <ObservationInfo elevation={sunEph?.el ?? null} />
 
-        <section aria-label="Live spectra and solar images" className="live-monitor-grid">
+        <SpectrumControls spectrum={spectrum} />
+
+        <section aria-label="Live spectra and solar images" className={`live-monitor-grid ${spectrum.measuring?'measure-open':''}`}>
           <section aria-label="Live Stokes I and V spectra" className="live-spectrum-stack grid min-w-0 gap-4">
             <section aria-labelledby="intensity-title" className="live-spectrum-panel overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
@@ -161,7 +165,7 @@ function App() {
                   <span>3×10³</span><span>Log · s.f.u.</span>
                 </div>
               </div>
-              <SpectrumCanvas ref={intensityRef} polarization="I" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
+              <SpectrumCanvas ref={intensityRef} data={spectrum.data} view={spectrum.view} onPause={spectrum.pause} onZoom={spectrum.zoom} measurePoints={measurement.points} onMeasurePoint={spectrum.measuring&&!spectrum.snapshotLoading?measurement.addPoint:undefined} polarization="I" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
             </section>
             <section aria-labelledby="circular-title" className="live-spectrum-panel overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
@@ -172,14 +176,17 @@ function App() {
                   <span>+0.6</span><span>Linear · V / I</span>
                 </div>
               </div>
-              <SpectrumCanvas polarization="V" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
+              <SpectrumCanvas data={spectrum.data} view={spectrum.view} onPause={spectrum.pause} onZoom={spectrum.zoom} measurePoints={measurement.points} onMeasurePoint={spectrum.measuring&&!spectrum.snapshotLoading?measurement.addPoint:undefined} polarization="V" className="live-spectrum-canvas h-[230px] w-full sm:h-[280px]" />
             </section>
           </section>
 
-          <RadioImagesPanel />
+          <div className="live-image-stack">
+            <MeasurementPanel spectrum={spectrum} tool={measurement} onClose={closeMeasurement}/>
+            <RadioImagesPanel />
+          </div>
         </section>
 
-        {spectrum.historyLoading && <p role="status" className="text-xs text-slate-400">Loading earlier history… live data continues updating.</p>}
+
 
         <section aria-label="Observation status, flagging map, imaging status, events, and AI summary" className="grid min-w-0 items-start gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
           <AntennaFlagsCard />
@@ -211,7 +218,7 @@ function App() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">
-                  Frames received
+                  Samples in selected range
                 </span>
                 <span>{spectrum.frameCount}</span>
               </div>
@@ -387,19 +394,25 @@ function App() {
             </CardContent>
           </Card>
 
-          <Card className="bg-slate-900/80 border-slate-800">
+          <Card data-testid="ai-summary-card" className="bg-slate-900/80 border-slate-800">
             <CardHeader>
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2">
-                  <Gemini.Color size={18} />
+                  <OpenAI size={18} role="img" aria-label="OpenAI" className="shrink-0 text-slate-200" />
                   <CardTitle>AI summary</CardTitle>
                 </div>
                 <span className="text-[10px] tracking-wide text-slate-500">
-                  Powered by gemini-3.1-flash-lite
+                  Powered by {aiResult?.model && aiResult.model !== 'gpt-6-luna' ? aiResult.model : 'GPT-6 Luna'}
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  Latest five-minute spectrum · UTC
                 </span>
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              {aiResult?.status === 'stale' && (
+                <p role="status" className="text-xs text-amber-400">Stale interpretation · {aiResult.error || 'Waiting for an updated interpretation'}</p>
+              )}
               {aiSummary ? (
                 <>
                   <p className="text-slate-200">
@@ -416,7 +429,7 @@ function App() {
                 </>
               ) : (
                 <p className="text-slate-500">
-                  Waiting for AI summary...
+                  {aiResult?.error || 'Waiting for AI summary...'}
                 </p>
               )}
             </CardContent>
